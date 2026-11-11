@@ -494,8 +494,8 @@ Gemini chat models on Developer API (Google AI Studio) (17 available):
 Pass model='<id>' to any tool. Omit to use the default (gemini-3.8-flash).
 Or pass flash / flash-lite / pro to get the newest release of that family.
 ```
-On an Agent Platform backend the header names the backend (`Vertex AI`, its old name, in
-the tool's output) and the `-latest` aliases are absent from the
+On an Agent Platform backend the header names the backend
+(`Google Cloud Agent Platform (Vertex AI)`) and the `-latest` aliases are absent from the
 catalog (the bridge still accepts them as `model=` values and resolves them itself).
 
 **Diagram:** [diagrams/list-models.mermaid](diagrams/list-models.mermaid) — how `list_models` fetches, filters, caches and falls back.

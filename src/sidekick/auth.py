@@ -172,17 +172,12 @@ def _service_account_credentials(info: dict[str, object]) -> google.auth.credent
 
 
 def _keychain_store_fix(service: str, account: str) -> str:
-    """How to (re-)store the SA JSON by hand; /sidekick:setup can't store it yet (#123).
-
-    `-w` with no value would prompt instead of putting the JSON on argv, but the prompt reads a
-    single line (and a terminal line caps at 1024 bytes), so a multi-line SA key can't go through
-    it. `$(cat …)` is on argv only while `security` runs; the hex decode below reads it back."""
+    """How to (re-)store the SA JSON: /sidekick:setup stores it from a file path (#123)."""
     return (
-        "Fix: store the service account key from a terminal (never paste it into the chat):\n"
-        f"  security add-generic-password -U -s '{service}' -a '{account}' "
-        '-w "$(cat /path/to/sa-key.json)"\n'
-        "then delete the JSON file and run /reload-plugins in Claude Code. "
-        "See docs/auth.md, Method 3: Apple Keychain."
+        "Fix: run /sidekick:setup, choose Google Cloud Agent Platform, then Service account in "
+        f"macOS Keychain, and give it the key file's path (service '{service}', account "
+        f"'{account}'). Never paste the key into the chat. Then run /reload-plugins. "
+        "See docs/auth.md, Method 4: Apple Keychain."
     )
 
 

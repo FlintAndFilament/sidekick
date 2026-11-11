@@ -291,3 +291,129 @@ class TestKeychainProblemCatchesNonServiceAccountJSON:
         monkeypatch.setattr(setup_cli, "_load_keychain", _raise)
         code, out = run(cfg, "write", "--auth-method", "keychain")
         assert code == 2 and not out["ok"]
+
+
+class TestKeychainStore:
+    """#123: setup stores the SA key itself — from a file path, on stdin, never on argv."""
+
+    SECRET = "-----BEGIN-----\nnot-a-real-key 'quoted' \\ end\n-----END-----\n"
+
+    def _key_file(self, tmp_path: Path, **over: object) -> Path:
+        info: dict[str, object] = {
+            "type": "service_account",
+            "private_key": self.SECRET,
+            "client_email": "sa@p.iam.gserviceaccount.com",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        info.update(over)
+        path = tmp_path / "sa-key.json"
+        path.write_text(json.dumps(info, indent=2))
+        return path
+
+    @pytest.fixture
+    def security(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], str]]:
+        """Fake `security -i` that parses the command line the way the real one does."""
+        calls: list[tuple[list[str], str]] = []
+
+        def fake_run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            calls.append((argv, str(kw.get("input"))))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(setup_cli.sys, "platform", "darwin")
+        monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+        return calls
+
+    def _store(self, *args: str) -> tuple[int, dict]:  # type: ignore[type-arg]
+        import contextlib
+        import io
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = setup_cli.main(["keychain-store", *args])
+        return code, json.loads(out.getvalue())
+
+    def test_key_goes_on_stdin_never_argv(
+        self, tmp_path: Path, security: list[tuple[list[str], str]]
+    ) -> None:
+        key = self._key_file(tmp_path)
+        code, out = self._store("--file", str(key))
+        assert code == 0 and out["ok"] is True
+        [(argv, stdin)] = security
+        assert argv == ["security", "-i"]
+        assert "not-a-real-key" in stdin
+        assert "not-a-real-key" not in json.dumps(out)
+        assert out["file_deleted"] is False and key.exists()
+
+    def test_escaping_round_trips_through_shlex(
+        self, tmp_path: Path, security: list[tuple[list[str], str]]
+    ) -> None:
+        # security -i splits like a POSIX shell, but with backslash escapes inside quotes too.
+        # Undo exactly that escaping and the stored value must equal the compact key JSON.
+        import re as _re
+
+        self._store("--file", str(self._key_file(tmp_path)))
+        line = security[0][1]
+        m = _re.fullmatch(r"add-generic-password -U -s 'sidekick' -a 'vertex-sa' -w '(.*)'\n", line)
+        assert m is not None
+        stored = _re.sub(r"\\(.)", r"\1", m.group(1))
+        assert json.loads(stored)["private_key"] == self.SECRET
+
+    def test_delete_file_after_verify(
+        self, tmp_path: Path, security: list[tuple[list[str], str]]
+    ) -> None:
+        key = self._key_file(tmp_path)
+        code, out = self._store("--file", str(key), "--delete-file")
+        assert code == 0 and out["file_deleted"] is True
+        assert not key.exists()
+
+    def test_failed_read_back_keeps_the_file(
+        self,
+        tmp_path: Path,
+        security: list[tuple[list[str], str]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(setup_cli, "_keychain_problem", lambda s, a: "Keychain item not found")
+        key = self._key_file(tmp_path)
+        code, out = self._store("--file", str(key), "--delete-file")
+        assert code == 2 and "reading it back failed" in out["error"]
+        assert key.exists()
+
+    @pytest.mark.parametrize(
+        "over", [{"type": "external_account"}, {"type": "authorized_user"}, {"private_key": ""}]
+    )
+    def test_non_service_account_is_refused(
+        self, tmp_path: Path, security: list[tuple[list[str], str]], over: dict[str, object]
+    ) -> None:
+        code, out = self._store("--file", str(self._key_file(tmp_path, **over)))
+        assert code == 2 and not security
+        assert "not-a-real-key" not in out["error"]
+
+    def test_security_stderr_is_never_relayed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fake_run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(argv, 1, "", f"unknown command {kw['input']}")
+
+        monkeypatch.setattr(setup_cli.sys, "platform", "darwin")
+        monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+        code, out = self._store("--file", str(self._key_file(tmp_path)))
+        assert code == 2 and "not-a-real-key" not in out["error"]
+
+    def test_oversized_key_is_refused_not_truncated(
+        self, tmp_path: Path, security: list[tuple[list[str], str]]
+    ) -> None:
+        code, out = self._store("--file", str(self._key_file(tmp_path, private_key="k" * 5000)))
+        assert code == 2 and "too large" in out["error"] and not security
+
+    @pytest.mark.parametrize("name", ["it's", "a b", "x\\y", ""])
+    def test_unsafe_names_are_refused(
+        self, tmp_path: Path, security: list[tuple[list[str], str]], name: str
+    ) -> None:
+        key = str(self._key_file(tmp_path))
+        code, _ = self._store("--file", key, "--keychain-service", name)
+        assert code == 2 and not security
+
+    def test_refused_off_macos(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(setup_cli.sys, "platform", "linux")
+        code, out = self._store("--file", str(self._key_file(tmp_path)))
+        assert code == 2 and "macOS" in out["error"]

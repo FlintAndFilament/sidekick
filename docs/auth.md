@@ -19,11 +19,17 @@ bridge's file tools is Developer-API only).
 "Vertex AI" here is **Google Cloud Agent Platform** (Google's new name for Vertex AI); the
 config keeps the old method names.
 
-Credentials are loaded once, at server startup. If they are missing or broken, the server still
-connects but offers only a `setup_status` tool that explains the problem and the fix, so Claude
-can tell you what to do instead of `/mcp` showing just "Connection closed". The problem is also
-written to the log (see [logging.md](logging.md)); the messages are listed in
+Credentials are loaded once, at server startup. If they are missing or **can't be loaded** (no
+key, no file, an unreadable Keychain item, no ADC), the server starts in **setup mode**: it
+still connects but offers only a `setup_status` tool that explains the problem and the fix, so
+Claude can tell you what to do instead of `/mcp` showing just "Connection closed". The problem
+is also written to the log (see [logging.md](logging.md)); the messages are listed in
 [Troubleshooting](#troubleshooting).
+
+Startup does **not** check that credentials work. A wrong or revoked key, an expired ADC token
+or a missing IAM role loads fine, so all tools appear, and then calls fail. `list_models` shows
+it as `[sidekick notice] Live model list unavailable (…)`; the last step of `/sidekick:setup`
+runs that check for you.
 
 **Setting up auth.** Install the plugin (`/plugin install sidekick@sidekick`), then run
 `/sidekick:setup`. It offers three paths and walks you through the one you pick:

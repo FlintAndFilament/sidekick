@@ -4,6 +4,11 @@ Eight tools: five generating tools (`ask`, `brainstorm`, `review`,
 `debug`, `architect`) that call Gemini, and three utilities that do not generate:
 [`list_models`](#list_models), [`list_sessions`](#list_sessions) and [`help`](#help).
 
+**Setup mode.** If the server can't start for real (config, auth, `transcript_dir` or
+`artifacts_dir` problem), it still connects but offers only one tool, `setup_status`, which
+explains the problem and the fix. None of the eight tools below exist until that is fixed and
+the server is restarted; see [auth.md](auth.md#change-settings--reconnect).
+
 The five generating tools share four optional parameters:
 - `thinking: "none" | "low" | "medium" | "high"` — reasoning depth; omit to use `default_thinking`
   in config. If a model rejects a level, the bridge steps up to the next one it accepts and
@@ -126,7 +131,8 @@ and `help` all follow.
 against what the text promised, so wording that over- or under-claims fails the suite.
 
 **Artifacts** land in `artifacts_dir` (default `./sidekick-artifacts/`, which must be inside the
-sandbox root and not denied, or the server refuses to start) as
+sandbox root and not denied, or the server starts in setup mode with only `setup_status`; see
+[configuration.md](configuration.md#artifacts_dir)) as
 `YYYYMMDD-HHMM-<tool>-<topic-slug>.md` — for example
 `20260921-1432-review-is-there-a-race-condition-in.md`. The slug comes from `question`
 (else `content` / `description`) for review and architect, and from `topic` for brainstorm. The

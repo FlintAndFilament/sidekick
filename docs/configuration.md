@@ -13,10 +13,14 @@ A saved `default_model` is kept when you accept the prompt's default; enter `-` 
 the file is not valid JSON, the wizard moves it aside to `config.json.<timestamp>.bak` — one copy
 per broken run, never overwritten (#96) — and starts fresh rather than merging into it. The merged
 file is written through a temp file and renamed into place, so an interrupted write cannot leave a
-half-written config (#95). A missing file, invalid JSON, or a value that fails validation stops the server
-at startup with `Config file not found`, `Config file is not valid JSON`, or
-`Config validation failed: …` in the log (see [logging.md](logging.md)). Unknown keys are ignored
-silently, so check spelling if a setting seems to have no effect.
+half-written config (#95).
+
+**When the config is wrong, the server starts in setup mode**: it connects but offers only
+`setup_status`, which names the problem, and the log says the same (see [logging.md](logging.md)).
+The messages are `Config file not found`, `Config file is not valid JSON`, `Config file could not
+be read` and `Config validation failed: …`. A missing file is fine when the plugin's **Gemini API
+key** option is set: the server then runs on that key with every default. Unknown keys are
+ignored silently, so check spelling if a setting seems to have no effect.
 
 ## Full example
 
@@ -114,8 +118,8 @@ it judges a different level is appropriate.
 **Default:** `"./session-summaries"`
 
 Directory where transcript files are written. Created if it doesn't exist; if it can't be
-created (read-only parent, permission denied) the server stops at startup with
-`Transcript directory cannot be created: …` instead of a traceback (#87). Transcript files
+used (read-only parent, permission denied) the server starts in setup mode, offering only
+`setup_status`, with `transcript_dir: Transcript directory cannot be used: …` (#87). Transcript files
 are named `YYYYMMDD-HHMM-sidekick-transcript.md` using the server startup time.
 
 The project root is `CLAUDE_PROJECT_DIR` when Claude Code sets it, otherwise the server's

@@ -206,7 +206,7 @@ Also in `v0.5.0`:
 - The service-account file guard echoes a value only when it is shaped like a file path. The
   old check looked for `AIza…` keys and missed newer `AQ…` keys pasted into the option (#119).
 
-### Fixes (#122, #124)
+### Fixes (#122–#124)
 
 - A 503/429 fallback answer is now part of the named conversation. The retry on Flash-Lite sees
   the session's earlier turns, and its answer is committed to the requested model's session, so
@@ -216,12 +216,16 @@ Also in `v0.5.0`:
   `load_credentials_from_file`, which accepts any credential type, including an external-account
   config that fetches tokens from URLs the file names. Any other type is refused with an error
   that names the type it found (#124).
+- `/sidekick:setup` stores a service account in the macOS Keychain itself. It asks for the key
+  file's path, never its contents. The new `sidekick-setup keychain-store` subcommand checks the
+  file is a service-account key, passes it to `security` on stdin (never argv, never the
+  chat), reads it back to prove it works, and can delete the file afterwards (#123).
 
 ---
 
 ## Open
 
-- #123 — `/sidekick:setup` cannot store a service account in the macOS Keychain.
+None.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 

@@ -134,10 +134,11 @@ class TestKeychain:
             with pytest.raises(AuthError, match="Keychain item not found") as err:
                 build_credentials(_keychain_config())
         message = str(err.value)
-        # A manual store command, not a loop back to /sidekick:setup (which can't store it, #123).
-        assert "security add-generic-password -U" in message
-        assert '-w "$(cat /path/to/sa-key.json)"' in message
-        assert "/sidekick:setup" not in message
+        # /sidekick:setup can store the item now (#123), so the fix sends the user there with the
+        # names to use, and never suggests a store command that puts the key on argv.
+        assert "/sidekick:setup" in message
+        assert "service 'svc', account 'acct'" in message
+        assert "add-generic-password" not in message
         assert "/reload-plugins" in message
 
     def test_keychain_security_missing_raises_auth_error(self) -> None:

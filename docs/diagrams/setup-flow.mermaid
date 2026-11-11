@@ -14,7 +14,7 @@ flowchart TD
     PATH -->|"C. Google Cloud Agent Platform"| C0{"sign-in method"}
     C0 -->|adc| C1["gcloud auth application-default login<br/>(+ set-quota-project)"]
     C0 -->|env| C2["you: pick the JSON key in<br/>Service-account key file"]
-    C0 -->|"keychain (macOS)"| C3["store the SA JSON in Keychain<br/>(safe command in auth.md)"]
+    C0 -->|"keychain (macOS)"| C3["you: path to the SA key file<br/>setup: keychain-store (stdin, read back,<br/>delete the file if you chose to)"]
     C1 --> C4["project + location"]
     C2 --> C4
     C3 --> C4

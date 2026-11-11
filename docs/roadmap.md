@@ -206,7 +206,7 @@ Also in `v0.5.0`:
 - The service-account file guard echoes a value only when it is shaped like a file path. The
   old check looked for `AIza…` keys and missed newer `AQ…` keys pasted into the option (#119).
 
-### Fixes (#122–#124)
+### Fixes (#122–#124) — 0.5.2
 
 - A 503/429 fallback answer is now part of the named conversation. The retry on Flash-Lite sees
   the session's earlier turns, and its answer is committed to the requested model's session, so

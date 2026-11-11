@@ -6,7 +6,7 @@ What has shipped, what is open, and what is parked. Rebuilt from git history and
 The `26.7.x` labels are the names the July releases went out under. Work after 26.7.4 is grouped
 by feature and issue number. From the plugin on, releases carry the plugin version
 (`.claude-plugin/plugin.json`): 0.1.0 plugin, 0.2.0 and 0.3.0 rename, 0.4.0 `list_sessions`
-(tagged `v0.4.0`).
+(tagged `v0.4.0`), 0.5.0 auth set up inside Claude Code.
 
 The project was called gemini-bridge until 2026-09-24 (#104). Upgrading an older install: **before** `/plugin update sidekick`, run `mv ~/.config/gemini-bridge ~/.config/sidekick`, then update and restart. (After the update, the new server has already created `~/.config/sidekick/`, and `mv` nests the old folder inside it.)
 
@@ -169,6 +169,16 @@ conversations with tool, name, model and turn count, most recently used first. T
 
 #17 (a `set_transcript_dir` tool) was closed as not planned: transcripts are already
 project-local by default, and nothing has needed to switch directories mid-session.
+
+### Auth set up inside Claude Code (#116) — 0.5.0
+
+No shell-profile export or launch alias is needed. The Gemini API key is a masked plugin option
+that Claude Code keeps in the system keychain, and the Agent Platform (formerly Vertex AI)
+service-account file is a picker option; both are set from `/plugin` → Configure options. A
+missing or broken credential no longer ends in "Connection closed": the server starts in
+setup mode with one `setup_status` tool that explains the fix. `/sidekick:setup` walks three
+paths (keychain key, env-var key, Agent Platform) and verifies them with a live model list.
+Also: certifi bumped for Dependabot alert #1 (#117).
 
 ---
 

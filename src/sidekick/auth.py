@@ -7,7 +7,7 @@ Responsibilities:
   - Load Application Default Credentials (ADC) — default method
   - Load service account credentials from GOOGLE_APPLICATION_CREDENTIALS env var
   - Load service account credentials from Apple Keychain (macOS)
-  - Read the Google AI Studio API key from the configured env var (api_key method)
+  - Read the Google AI Studio API key: plugin option first, then the configured env var
   - Build a google.auth.credentials.Credentials instance for any configured method
 
 Design notes:
@@ -38,7 +38,13 @@ import google.auth.credentials
 import google.auth.exceptions
 from google.oauth2 import service_account
 
-from sidekick.config import AuthConfig, ConfigError
+from sidekick.config import (
+    PLUGIN_SA_FILE_VAR,
+    AuthConfig,
+    ConfigError,
+    plugin_api_key,
+    plugin_option,
+)
 
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
@@ -73,29 +79,55 @@ def _load_adc(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
 
 
 _ENV_CREDENTIALS_VAR = "GOOGLE_APPLICATION_CREDENTIALS"
-_ENV_FIX = f"Fix: export {_ENV_CREDENTIALS_VAR}=/path/to/sa-key.json"
+_ENV_FIX = (
+    "Fix: in Claude Code type /plugin, open Installed → sidekick → Configure options and pick "
+    "the file in **Service-account key file**, then /mcp → Reconnect. "
+    f"(Or set {_ENV_CREDENTIALS_VAR} in the environment Claude Code starts from.)"
+)
+
+
+def _not_a_path(value: str) -> bool:
+    """True for secret-shaped text where a file path belongs: an API key or pasted key JSON."""
+    return (
+        value.startswith("AIza")
+        or any(marker in value for marker in ("{", "\n", "private_key", "BEGIN "))
+        or len(value) > 1024
+    )
 
 
 def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
-    """Load credentials from the file named by GOOGLE_APPLICATION_CREDENTIALS.
+    """Load credentials from the plugin's file option, else GOOGLE_APPLICATION_CREDENTIALS.
 
     The variable and the file are checked here, and the file is then loaded explicitly, because
     google.auth.default() falls back to the user's gcloud ADC when the variable is unset. That
     fallback would silently run the server as the user instead of the configured service
     account, and only fail if ADC were missing too (#86).
     """
-    path = os.environ.get(_ENV_CREDENTIALS_VAR, "").strip()
+    from_plugin = plugin_option(PLUGIN_SA_FILE_VAR)
+    path = from_plugin or os.environ.get(_ENV_CREDENTIALS_VAR, "").strip()
+    source = "the plugin's service-account file option" if from_plugin else _ENV_CREDENTIALS_VAR
     if not path:
-        _log.error("%s is not set", _ENV_CREDENTIALS_VAR)
-        raise AuthError(
-            f"Gemini auth error: auth method is 'env' but {_ENV_CREDENTIALS_VAR} is not set.\n"
-            f"{_ENV_FIX}"
+        _log.error(
+            "no service-account file: plugin option unset and %s not set", _ENV_CREDENTIALS_VAR
         )
-    if not os.path.isfile(path):
-        _log.error("%s points at a missing file: %s", _ENV_CREDENTIALS_VAR, path)
         raise AuthError(
-            f"Gemini auth error: {_ENV_CREDENTIALS_VAR} points at a file that does not "
-            f"exist: {path}\n{_ENV_FIX}"
+            "Gemini auth error: auth method is 'env' but no service-account key file is set "
+            f"(plugin option empty, {_ENV_CREDENTIALS_VAR} not set).\n{_ENV_FIX}"
+        )
+    if _not_a_path(path):
+        # Never echo it: a mis-pasted API key or SA JSON would land in the log, in setup_status
+        # and so in the model's context (#116).
+        _log.error("%s holds something that is not a file path (value withheld)", source)
+        raise AuthError(
+            f"Gemini auth error: {source} holds something that isn't a file path (it looks like "
+            "a key or key JSON, so it is not shown). Clear it and pick the JSON key file "
+            "instead.\n" + _ENV_FIX
+        )
+    path = os.path.expanduser(path)
+    if not os.path.isfile(path):
+        _log.error("%s points at a missing file: %s", source, path)
+        raise AuthError(
+            f"Gemini auth error: {source} points at a file that does not exist: {path}\n{_ENV_FIX}"
         )
     try:
         # google-auth ships no annotation for this helper; the return type is documented.
@@ -105,7 +137,8 @@ def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
     except (google.auth.exceptions.GoogleAuthError, ValueError, OSError) as exc:
         _log.error("env credential load failed: %s", exc)
         raise AuthError(
-            f"Gemini auth error: {_ENV_CREDENTIALS_VAR} file could not be loaded: {path}\n"
+            f"Gemini auth error: the service-account file from {source} could not be loaded: "
+            f"{path}\n"
             f"({exc})\n{_ENV_FIX}"
         ) from exc
     _log.debug("env credentials loaded from %s", path)
@@ -160,7 +193,15 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
 
     _log.debug("keychain credentials loaded (service=%r, account=%r)", service, account)
 
-    return service_account.Credentials.from_service_account_info(sa_info, scopes=_VERTEX_SCOPES)
+    try:
+        return service_account.Credentials.from_service_account_info(sa_info, scopes=_VERTEX_SCOPES)
+    # Valid JSON that is not a service account (or lacks fields) raises these, not AuthError.
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        _log.error("keychain value is not a service account (%s)", type(exc).__name__)
+        raise AuthError(
+            "Gemini auth error: Keychain value is not valid service account JSON.\n"
+            "Fix: run /sidekick:setup in Claude Code to re-store the service account key."
+        ) from exc
 
 
 def _looks_like_api_key(value: str) -> bool:
@@ -168,26 +209,38 @@ def _looks_like_api_key(value: str) -> bool:
     return value.startswith("AIza") or not value.replace("_", "").isupper() or len(value) > 40
 
 
+_CONFIGURE_HINT = (
+    "Fix: in Claude Code run /sidekick:setup, or type /plugin, open Installed → sidekick → "
+    "Configure options and paste your key (stored in your system keychain).\n"
+    "Get a key at: https://aistudio.google.com/apikey"
+)
+
+
 def _load_api_key(auth_config: AuthConfig) -> str:
-    """Read Gemini Developer API key from the configured env var. Raises AuthError if unset."""
+    """Read the Gemini Developer API key. Raises AuthError if neither source has one.
+
+    The plugin option (Claude Code secure storage) wins; otherwise the shell env var named by
+    api_key_env, for users who export it themselves (#116)."""
+    from_plugin = plugin_api_key()
+    if from_plugin is not None:
+        _log.debug("api_key loaded from the plugin option")
+        return from_plugin
     env_var = auth_config.api_key_env or "GEMINI_API_KEY"
     if _looks_like_api_key(env_var):
         _log.error("api_key_env looks like a key value, not a variable name")
         raise AuthError(
             "Gemini config error: 'api_key_env' in config.json contains what looks like "
             "an API key, not an environment variable name.\n"
-            'Fix: set api_key_env to the variable name (e.g. "GEMINI_API_KEY"), '
-            "then export that variable:\n"
-            "  export GEMINI_API_KEY=<your-key>\n"
-            "Edit ~/.config/sidekick/config.json or run /sidekick:setup in Claude Code."
+            'Fix: set api_key_env to the variable name (e.g. "GEMINI_API_KEY"), or remove '
+            "the key from config.json and store it in the plugin's options instead.\n"
+            + _CONFIGURE_HINT
         )
     key = os.environ.get(env_var, "").strip()
     if not key:
-        _log.error("api_key env var not set or empty: %s", env_var)
+        _log.error("no api key: plugin option unset and env var %s not set", env_var)
         raise AuthError(
-            f"Gemini auth error: env var {env_var!r} is not set or is empty.\n"
-            f"Fix: export {env_var}=<your-Google-AI-Studio-key>\n"
-            "Get a key at: https://aistudio.google.com/apikey"
+            f"Gemini auth error: no API key. The plugin's key option is empty and env var "
+            f"{env_var!r} is not set.\n" + _CONFIGURE_HINT
         )
     _log.debug("api_key loaded from %s", env_var)
     return key

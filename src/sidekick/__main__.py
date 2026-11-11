@@ -9,7 +9,7 @@ Responsibilities:
   - Build credentials via auth.build_auth()
   - Instantiate GeminiClient and TranscriptWriter
   - Build and run the MCP server
-  - Report startup errors with actionable messages
+  - On a setup problem, serve a setup_status tool instead of exiting (#116)
 
 Design notes:
   - Single Responsibility: startup orchestration only; all logic lives in imported modules
@@ -24,8 +24,8 @@ Log files:
 Environment variables:
   SIDEKICK_LOG_LEVEL  — DEBUG | INFO | WARNING | ERROR (default: INFO)
 
-Raises:
-  SystemExit(1) — on config or auth failure at startup
+Startup failures never exit: a config, auth, transcript or artifacts problem starts the
+setup server (server.build_setup_server) so /mcp shows "connected" and Claude can explain.
 
 Used by:  pyproject.toml [project.scripts], MCP registration (python -m sidekick)
 Imports:  config.py, auth.py, client.py, transcript.py, server.py
@@ -34,6 +34,10 @@ Imports:  config.py, auth.py, client.py, transcript.py, server.py
 import logging
 import os
 import sys
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 from datetime import datetime
 from pathlib import Path
 
@@ -118,7 +122,31 @@ _configure_logging(_startup_time)
 _log = logging.getLogger("sidekick.__main__")
 
 
+def _serve_setup_problem(problem: str) -> None:
+    from sidekick.server import build_setup_server
+
+    build_setup_server(problem).run()
+
+
 def main() -> None:
+    try:
+        server = _start()
+    except Exception as exc:  # noqa: BLE001 - last resort: never leave only "Connection closed"
+        # Type name only: an unexpected message could carry anything, secrets included.
+        _log.exception("startup failed — unexpected error")
+        _serve_setup_problem(
+            f"Unexpected startup error ({type(exc).__name__}). Details are in the sidekick log "
+            "(~/.config/sidekick/logs/)."
+        )
+        return
+    # Outside the try: a failure while serving is not a startup failure, and must not start a
+    # second (setup) server on the same stdio.
+    if server is not None:
+        server.run()
+
+
+def _start() -> "Optional[FastMCP]":
+    """Build the real server, or serve setup mode and return None on a setup problem."""
     startup_time = _startup_time
 
     from sidekick.auth import AuthError, build_auth
@@ -133,13 +161,15 @@ def main() -> None:
         config = load_config()
     except ConfigError as exc:
         _log.error("startup failed — config error: %s", exc)
-        sys.exit(1)
+        _serve_setup_problem(str(exc))
+        return None
 
     try:
         auth_result = build_auth(config.auth)
     except AuthError as exc:
         _log.error("startup failed — auth error: %s", exc)
-        sys.exit(1)
+        _serve_setup_problem(str(exc))
+        return None
 
     client = GeminiClient(config, credentials=auth_result.credentials, api_key=auth_result.api_key)
     latest = client.refresh_latest()  # one models.list call; pinned defaults if it fails
@@ -166,7 +196,8 @@ def main() -> None:
         transcript = TranscriptWriter(config.transcript_dir, startup_time, base=root)
     except TranscriptError as exc:
         _log.error("startup failed — %s", exc)
-        sys.exit(1)
+        _serve_setup_problem(f"transcript_dir: {exc}")
+        return None
 
     _log.info("transcript → %s", transcript.path)
 
@@ -174,7 +205,8 @@ def main() -> None:
         workspace = build_workspace(config, root)
     except SandboxError as exc:
         _log.error("startup failed — artifacts_dir %r: %s", config.artifacts_dir, exc)
-        sys.exit(1)
+        _serve_setup_problem(f"artifacts_dir {config.artifacts_dir!r}: {exc}")
+        return None
     _log.info(
         "file tools %s — sandbox root %s — artifacts → %s",
         "enabled" if workspace.tools_enabled else f"DISABLED ({workspace.disabled_reason})",
@@ -182,8 +214,7 @@ def main() -> None:
         workspace.artifacts.directory,
     )
 
-    server = build_server(client, transcript, workspace)
-    server.run()
+    return build_server(client, transcript, workspace)
 
 
 if __name__ == "__main__":

@@ -77,14 +77,15 @@ never prints a value. For scripts and CI, `claude plugin configure sidekick@side
 --values-stdin` reads the options as a JSON object of single-line strings on stdin, so the key
 stays off the command line; options you leave out keep their values.
 
-**Updating sidekick.** `/plugin update sidekick` inside a session does **not** update the
-plugin. From a terminal, run:
+**Updating sidekick.** In Claude Code, open `/plugin`, go to **Installed** → sidekick and
+choose update. Or, from a terminal:
 
 ```bash
 claude plugin marketplace update sidekick && claude plugin update sidekick@sidekick
 ```
 
-then run `/reload-plugins` in Claude Code.
+Either way, run `/reload-plugins` afterwards so the new version starts. `claude plugin list`
+shows the installed version.
 
 ---
 

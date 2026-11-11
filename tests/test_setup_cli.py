@@ -312,11 +312,21 @@ class TestKeychainStore:
 
     @pytest.fixture
     def security(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], str]]:
-        """Fake `security -i` that parses the command line the way the real one does."""
+        """Fake `security`: records `-i` calls and stores the value it would hold (undoing the
+        backslash escaping), so `find-generic-password -w` reads back what was stored."""
+        import re as _re
+
         calls: list[tuple[list[str], str]] = []
+        stored: dict[str, str] = {}
 
         def fake_run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            if argv[:2] == ["security", "find-generic-password"]:
+                value = stored.get("v")
+                return subprocess.CompletedProcess(argv, 0 if value else 44, f"{value}\n", "")
             calls.append((argv, str(kw.get("input"))))
+            m = _re.search(r"-w '(.*)'\n$", str(kw.get("input")))
+            if m:
+                stored["v"] = _re.sub(r"\\(.)", r"\1", m.group(1))
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         monkeypatch.setattr(setup_cli.sys, "platform", "darwin")
@@ -417,3 +427,38 @@ class TestKeychainStore:
         monkeypatch.setattr(setup_cli.sys, "platform", "linux")
         code, out = self._store("--file", str(self._key_file(tmp_path)))
         assert code == 2 and "macOS" in out["error"]
+
+    def test_older_item_at_same_names_does_not_count_as_stored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Review finding: `security -i` exits 0 but the item still holds an older key. The
+        # credentials check would pass, so the value itself must be compared before deleting.
+        def fake_run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            if argv[:2] == ["security", "find-generic-password"]:
+                old = json.dumps({"type": "service_account", "private_key": "older"})
+                return subprocess.CompletedProcess(argv, 0, old + "\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(setup_cli.sys, "platform", "darwin")
+        monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+        key = self._key_file(tmp_path)
+        code, out = self._store("--file", str(key), "--delete-file")
+        assert code == 2 and "not stored" in out["error"]
+        assert key.exists()
+
+    def test_hex_read_back_is_decoded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # macOS returns a value with non-printable bytes as hex; the comparison must decode it.
+        key = self._key_file(tmp_path)
+        compact = json.dumps(json.loads(key.read_text()), separators=(",", ":"))
+
+        def fake_run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            if argv[:2] == ["security", "find-generic-password"]:
+                return subprocess.CompletedProcess(argv, 0, compact.encode().hex() + "\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(setup_cli.sys, "platform", "darwin")
+        monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+        code, out = self._store("--file", str(key))
+        assert code == 0 and out["ok"] is True

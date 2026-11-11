@@ -178,6 +178,26 @@ def _security_store_line(service: str, account: str, secret: str) -> str:
     return f"add-generic-password -U -s '{service}' -a '{account}' -w '{escaped}'\n"
 
 
+def _keychain_value(service: str, account: str) -> Optional[str]:
+    """The item's stored value, hex-decoded when macOS returns it that way; None if unreadable."""
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv
+            ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.rstrip("\n")
+    try:
+        return bytes.fromhex(raw).decode("utf-8")
+    except ValueError:
+        return raw
+
+
 def keychain_store(file: Path, service: str, account: str, delete_file: bool) -> dict[str, Any]:
     """Store a service-account key file in the macOS Keychain, then read it back. Raises SetupError."""
     if sys.platform != "darwin":
@@ -188,7 +208,8 @@ def keychain_store(file: Path, service: str, account: str, delete_file: bool) ->
                 f"Keychain {label} name must be 1-64 letters, digits, '.', '_', '@' or '-'."
             )
     file = file.expanduser()
-    line = _security_store_line(service, account, _read_sa_key(file))
+    secret = _read_sa_key(file)
+    line = _security_store_line(service, account, secret)
     if len(line) > _SECURITY_LINE_MAX:
         raise SetupError(
             f"{file} is too large to store through the security tool "
@@ -205,6 +226,13 @@ def keychain_store(file: Path, service: str, account: str, delete_file: bool) ->
         raise SetupError(
             f"The security tool refused to store the key (exit {result.returncode}). "
             "Nothing was written to config."
+        )
+    # The item must now hold exactly this key. A credentials check alone would pass on an
+    # older item at the same names, and --delete-file would then delete the only new copy.
+    if _keychain_value(service, account) != secret:
+        raise SetupError(
+            "The key was not stored: the Keychain item does not hold this file's key. "
+            "The file was kept."
         )
     problem = _keychain_problem(service, account)
     if problem:

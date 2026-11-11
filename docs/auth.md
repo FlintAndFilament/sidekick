@@ -16,16 +16,27 @@ models, `project`/`location` settings and IAM role (`roles/aiplatform.user`). **
 `[sidekick notice]` (the Gemini API flag that lets web tools share a request with the
 bridge's file tools is Developer-API only).
 
-Credentials are loaded once, at server startup. A failure stops the server and is written to the
-log (see [logging.md](logging.md)) with the fix; the messages are listed in
+"Vertex AI" here is **Google Cloud Agent Platform** (Google's new name for Vertex AI); the
+config keeps the old method names.
+
+Credentials are loaded once, at server startup. If they are missing or broken, the server still
+connects but offers only a `setup_status` tool that explains the problem and the fix, so Claude
+can tell you what to do instead of `/mcp` showing just "Connection closed". The problem is also
+written to the log (see [logging.md](logging.md)); the messages are listed in
 [Troubleshooting](#troubleshooting).
 
 **Setting up auth.** Install the plugin (`/plugin install sidekick@sidekick`), then run
-`/sidekick:setup` and pick a method — it writes `auth` in `config.json` for you. The one manual
-step it can't do for `api_key`: the key itself must be an environment variable in the shell that
-starts Claude Code (see [Method 4](#method-4-api-key-google-ai-studio) below), because the
-plugin's MCP server inherits Claude Code's environment directly, with no registration step to
-inject it.
+`/sidekick:setup`. It offers three paths and walks you through the one you pick:
+
+| Path | What you do | Shell setup |
+|---|---|---|
+| **A. API key in the keychain** (recommended) | Paste a Google AI Studio key into the plugin's masked **Gemini API key** option | none |
+| **B. API key from an env var** | Export the key yourself (CI, scripts, Linux, Windows) | yes |
+| **C. Google Cloud Agent Platform** | gcloud login (ADC), a service-account file, or a service account in macOS Keychain, plus a GCP project | ADC: none; file: one env var |
+
+To change or reset anything later, run `/sidekick:setup` again. To replace the key, use `/plugin`
+→ **Installed** → sidekick → **Configure options**. Then reconnect with `/mcp` → `plugin:sidekick:mcp`
+→ **Reconnect**, or restart Claude Code.
 
 ---
 
@@ -159,37 +170,28 @@ macOS only. The `security` CLI is not available on Linux, and `/sidekick:setup` 
 
 ## Method 4: API Key (Google AI Studio)
 
-The simplest path — no GCP project, no `gcloud` setup, no service account. Get a key from
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set an environment variable.
+The simplest path: no GCP project, no `gcloud`, no service account. Get a key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-**One-time setup:** export the key in the shell **profile** of the shell that starts Claude Code
-(e.g. `~/.zshrc`, `~/.bashrc`) — the plugin's MCP server inherits Claude Code's environment
-directly, so the key must already be set before Claude Code launches:
-```bash
-export GEMINI_API_KEY=AIza...
-```
-A one-off `export` in your current terminal, without adding it to the profile, will not survive
-the next time you start Claude Code. Claude Code launched from a GUI/desktop app icon (rather
-than a terminal) may not inherit shell-profile exports at all — launch it from a terminal in
-that case.
+**Path A: keychain (recommended).** The plugin declares a masked **Gemini API key** option.
+Claude Code asks for it when you install or enable the plugin in `/plugin`, and you can set or
+change it any time from `/plugin` → **Installed** → sidekick → **Configure options**. From a
+terminal, `claude plugin configure sidekick@sidekick` shows whether it is set. It never prints
+the value. Claude Code stores the value in the system keychain (macOS Keychain; a protected
+credentials file on other platforms), never in `settings.json`, and passes it to sidekick's
+server as `SIDEKICK_API_KEY`. There is nothing to export and no launch alias to maintain, and it
+works however Claude Code is started: terminal, tmux, desktop app, IDE.
 
-**Or keep the key in the macOS Keychain** instead of the profile, and read it only when you
-launch. Store it once (`-w` with no value prompts for it, so it never lands in shell history):
-```bash
-security add-generic-password -s sidekick-api-key -a "$USER" -w
-```
-Then add a named launch alias to your profile and start Claude Code with it:
-```bash
-# Claude Code with the sidekick plugin's Gemini API key (from macOS Keychain)
-alias cc-sidekick-mcp='GEMINI_API_KEY="$(security find-generic-password -s sidekick-api-key -a "$USER" -w)" command claude'
-```
-The key is set only for that `claude` process and its children, not in every shell.
+With the option filled in, no `config.json` is needed. A config with no `auth.method` is
+treated as `api_key`.
 
-**Run `/sidekick:setup` and choose `api_key`.** It asks for the **name** of the env var (default:
-`GEMINI_API_KEY`), re-prompts if what you typed looks like a key instead of a name (starts with
-`AIza`, contains lowercase letters, or is over 40 characters), and warns if the variable is not
-set in its own shell. The server applies the same check at startup and refuses to start if
-`api_key_env` looks like a key.
+**Path B: environment variable.** If you already export the key yourself, leave the option
+blank and choose "API key (env var)" in setup. It asks for the variable's **name** (default
+`GEMINI_API_KEY`), never the key. The variable must be set in the environment Claude Code is
+started from. If both are present, the plugin option wins.
+
+Setup re-prompts if a "name" looks like a key instead (starts with `AIza`, contains lowercase
+letters, or is over 40 characters). The server makes the same check at startup.
 
 **Config written by `/sidekick:setup`:**
 ```json
@@ -210,8 +212,8 @@ set in its own shell. The server applies the same check at startup and refuses t
 - Use this method for personal use, quick setup, or when you don't have a GCP project
 - ADC and Keychain methods remain first-class for team/enterprise use — they support larger
   quota tiers, org-managed access control, and service account rotation
-- The API key is read from the env var at server startup and held in memory; it is never
-  written to `config.json`
+- The API key is read at server startup and held in memory; it is never written to
+  `config.json`
 - This is the only method with web access (`web=true`, `web_tools.enabled`); see
   [tools.md](tools.md#web-access)
 
@@ -233,7 +235,7 @@ once to the newest Flash-Lite (see [configuration.md](configuration.md#choosing-
 | `Keychain item not found` | Secret not stored | Re-run the `security add-generic-password` command |
 | `not valid service account JSON` | Keychain value corrupted | Re-store the SA JSON key |
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |
-| `'GEMINI_API_KEY' is not set or is empty` | API key env var missing in the server's environment | Export it in the shell profile of the shell that starts Claude Code, then restart Claude Code (see above) |
+| `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Set the key in `/plugin` → Installed → sidekick → Configure options, then `/mcp` → Reconnect |
 | `'api_key_env' in config.json contains what looks like an API key` | The key itself was put in `api_key_env` | Set `api_key_env` to the variable name, e.g. `"GEMINI_API_KEY"` |
 | `'project' is required for Vertex AI auth methods` | `project` missing with `adc`/`env`/`keychain` | Add `project` to config.json, or switch to `api_key` |
 | `Web access was requested but is unavailable` | `web=true` on a Vertex method | Use `api_key` for web access |

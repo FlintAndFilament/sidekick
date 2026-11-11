@@ -133,8 +133,8 @@ instead.
 
 Where `architect` and `review` (and `brainstorm` with `write_artifact=true`)
 save their answers. Created on first save. It **must lie inside the project root and outside the
-deny-list** — the server refuses to start otherwise (the log shows
-`startup failed — artifacts_dir …`). This check runs even when `file_tools.enabled` is `false`,
+deny-list**. Otherwise the server starts in setup mode, offering only `setup_status`, and the
+log shows `startup failed — artifacts_dir …`. This check runs even when `file_tools.enabled` is `false`,
 because artifacts are written by the bridge, not by Gemini. `~` is not expanded here; use a
 relative path or an absolute path inside the project. Add the directory to `.gitignore` or commit
 it, per project.
@@ -246,9 +246,11 @@ The account name used in `security find-generic-password -a {account}`.
 **Default:** `"GEMINI_API_KEY"`
 **Only used when:** `auth.method = "api_key"`
 
-The name of the environment variable holding your Google AI Studio API key. The key itself
-is never stored in `config.json` — only the variable name. At server startup, the server
-reads the key from this env var and exits with an error if it is unset or empty. If the value
+The name of the environment variable holding your Google AI Studio API key (path B in
+[auth.md](auth.md)). The key itself is never stored in `config.json`, only the variable name.
+If the plugin's **Gemini API key** option is filled in, that key is used and this variable is
+not read. Otherwise the server reads the key from this variable at startup. If it is unset or
+empty, the server starts in setup mode and `setup_status` explains the fix. If the value
 looks like a key rather than a name (starts with `AIza`, contains lowercase letters, or is longer
 than 40 characters), startup fails with a message telling you to put the variable name here.
 

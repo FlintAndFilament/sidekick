@@ -19,7 +19,7 @@ Package root: `src/sidekick/`.
 | Module | Responsibility | Depends on (in-package) |
 |---|---|---|
 | `__init__.py` | Package identity only | none |
-| `__main__.py` | Startup: logging (daily file + stderr), config, auth, client, `refresh_latest()`, transcript, workspace, server; exits 1 on a config, auth or `artifacts_dir` error | config, auth, client, transcript, workspace, sandbox, server |
+| `__main__.py` | Startup: logging (daily file + stderr), config, auth, client, `refresh_latest()`, transcript, workspace, server; on a config, auth, transcript or `artifacts_dir` error it serves the `setup_status`-only setup server instead (#116) | config, auth, client, transcript, workspace, sandbox, server |
 | `config.py` | Pydantic models `Config`, `AuthConfig`, `FileToolsConfig`, `WebToolsConfig`; loads and validates `config.json`; raises `ConfigError` | sandbox (`DEFAULT_DENY`) |
 | `auth.py` | Credentials for `adc`, `env`, `keychain` and `api_key`; `build_auth()` returns `AuthResult(credentials, api_key)`; raises `AuthError` | config |
 | `errors.py` | `ClientError`, in its own module so `client.py` and `tool_loop.py` can both raise it | none |

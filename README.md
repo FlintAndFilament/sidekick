@@ -33,7 +33,7 @@ sidekick is a Claude Code plugin that gives Claude a live Gemini counterpart. Wh
 ```
 
 - **Needs [uv](https://docs.astral.sh/uv/).** `/sidekick:setup` offers to install it, and uv brings its own Python.
-- **Auth:** the quickest of the 4 options is a free [Google AI Studio key](https://aistudio.google.com/apikey). Export `GEMINI_API_KEY` in the shell that starts Claude Code, then choose `api_key` in setup. Vertex AI (ADC, service-account file, macOS Keychain) is covered in [docs/auth.md](docs/auth.md).
+- **Auth:** run `/sidekick:setup`. The quickest path is a free [Google AI Studio key](https://aistudio.google.com/apikey) pasted into the plugin's masked **Gemini API key** option. Claude Code keeps it in your system keychain, with no shell setup. An env var and Google Cloud Agent Platform (formerly Vertex AI) are also supported; see [docs/auth.md](docs/auth.md).
 - **Update:** `claude plugin marketplace update sidekick && claude plugin update sidekick@sidekick`, then `/reload-plugins`.
 
 Tested on macOS; Windows is not yet tested end to end.

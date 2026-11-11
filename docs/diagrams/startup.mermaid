@@ -1,0 +1,19 @@
+flowchart TD
+    ENV["plugin options → env<br/>SIDEKICK_API_KEY, SIDEKICK_SA_FILE"] -.->|"config.plugin_option()"| CFG
+    LOG["_configure_logging()<br/>daily file + stderr"] --> CFG["load_config()<br/>no file needed if plugin key set"]
+    CFG -->|ok| AUTH["build_auth(config.auth)<br/>plugin option first, then shell env"]
+    ENV -.-> AUTH
+    AUTH -->|ok| CL["GeminiClient(config, credentials, api_key)"]
+    CL --> LAT["client.refresh_latest()<br/>pinned ids if models.list fails"]
+    LAT --> ROOT["project_root()<br/>CLAUDE_PROJECT_DIR, else cwd"]
+    ROOT --> TR["TranscriptWriter(dir, startup, base=root)"]
+    TR -->|ok| WS["build_workspace(config, root)"]
+    WS -->|ok| SRV["build_server(client, transcript, workspace)"]
+    SRV --> RUN["server.run()<br/>outside the safety net"]
+
+    CFG -->|ConfigError| SETUP
+    AUTH -->|AuthError| SETUP
+    TR -->|TranscriptError| SETUP
+    WS -->|"SandboxError (artifacts_dir)"| SETUP
+    ANY["any other exception in _start()<br/>main() last resort: type name only"] --> SETUP
+    SETUP["build_setup_server(problem)<br/>instructions = problem text"] --> ST["only tool: setup_status"]

@@ -3,7 +3,7 @@ flowchart TD
     B -->|yes| C{alias?<br/>flash / flash-lite / pro / *-latest}
     B -->|no| D{default_model set?}
     D -->|yes| C
-    D -->|no| F[newest Flash]
+    D -->|no| F[newest Flash<br/>pinned id if list unreadable]
     C -->|yes| E[newest of that family<br/>pinned id if list unreadable]
     C -->|no| G[concrete id as given]
     E --> H[choose thinking parameter<br/>from concrete id]
@@ -12,4 +12,6 @@ flowchart TD
     H --> I{503 / 429 after retries?}
     I -->|no| J[return response]
     I -->|yes, model != fallback,<br/>no files written| K[retry once on<br/>newest Flash-Lite]
-    K --> L[return response<br/>+ notice]
+    I -->|yes, files written<br/>or already the fallback| X["[sidekick error]"]
+    K -->|ok| L[return response<br/>+ notice]
+    K -->|fails| X

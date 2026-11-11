@@ -249,25 +249,26 @@ Store the service account JSON in Apple Keychain. The server reads it once at st
 
 **Why Keychain over a disk file:** A SA JSON on disk is a persistent secret at rest. Keychain provides OS-managed storage with ACL enforcement. This is the preferred service account path for DLP-sensitive environments.
 
-**One-time setup — store the SA JSON.** `/sidekick:setup` does not store it for you (#123), so
-run this in a terminal first, never in the chat:
+**One-time setup: run `/sidekick:setup`** and choose Google Cloud Agent Platform → "Service
+account in macOS Keychain" → "Store a key file now". Give it the **path** to the JSON key file,
+never the key itself. Setup then:
+
+1. reads the file itself and refuses anything that isn't a service-account key;
+2. stores it with macOS `security`, passing the key on stdin, so it never appears on a command
+   line (`ps`) or in the chat;
+3. reads the item back and builds credentials from it, to prove it works;
+4. deletes the JSON file if you chose "Delete the file after storing" (recommended).
+
+Re-run it to store a rotated key; the item is replaced. macOS may ask you to allow Keychain
+access the first time.
+
+The same step outside Claude Code, from the plugin's directory:
 ```bash
-security add-generic-password -U \
-  -s "sidekick" \
-  -a "vertex-sa" \
-  -w "$(cat /path/to/sa-key.json)"
-rm /path/to/sa-key.json   # remove disk copy immediately
+uv run --frozen sidekick-setup keychain-store --file /path/to/sa-key.json \
+  --keychain-service sidekick --keychain-account vertex-sa --delete-file
 ```
 
-`-U` replaces an existing item, so the same command re-stores a rotated key. The JSON is on
-the `security` command line, visible to `ps`, for the moment the command runs. The bare `-w`
-form, which prompts instead, would keep it off the command line, but the prompt reads a single
-short line, so a multi-line service-account JSON can't be pasted into it.
-
-**Then run `/sidekick:setup` and choose Google Cloud Agent Platform → "Service account in
-macOS Keychain".** It asks for the service and account names, then checks that the item exists
-and holds valid JSON before writing config. If the item is missing, it shows the same store
-command.
+Setup then writes the config below.
 
 **Auth block written by `/sidekick:setup`** (alongside `project` and `location`):
 ```json
@@ -322,10 +323,10 @@ server treats both as unset.
 | `no ADC credentials found` | ADC not configured | `gcloud auth application-default login` |
 | Token refresh / `invalid_grant` errors on a call | ADC refresh token expired or revoked | `gcloud auth application-default login` |
 | `403 PERMISSION_DENIED: quota project not set` | ADC user credentials have no quota project | `gcloud auth application-default set-quota-project YOUR_PROJECT_ID` |
-| `auth method is 'env' but no service-account key file is set` / `points at a file that does not exist` / `could not be loaded` | `env` method: no file picked and `GOOGLE_APPLICATION_CREDENTIALS` unset, a missing file, or a file google-auth cannot read. ADC is never used as a fallback | Pick the file on the **Service-account key file** row, then restart ([how](#change-settings--reconnect)); check the file's contents |
+| `auth method is 'env' but no service-account key file is set` / `points at a file that does not exist` / `is not a service-account key` / `could not be loaded` | `env` method: no file picked and `GOOGLE_APPLICATION_CREDENTIALS` unset, a missing file, a credential file of another type (user or external-account configs are refused), or a key that isn't valid JSON or lacks fields. ADC is never used as a fallback | Pick the file on the **Service-account key file** row, then restart ([how](#change-settings--reconnect)); check the file's contents |
 | `holds something that isn't a file path` | A key or key JSON was pasted where the file path belongs (it is never shown) | Clear the row and pick the JSON key file instead |
-| `Keychain item not found` | Secret not stored, or different service/account names | Run the store command in [Method 4](#method-4-service-account-in-apple-keychain-macos-only), or fix the names with `/sidekick:setup` |
-| `Keychain value could not be decoded` / `not valid service account JSON` | The Keychain item holds something other than SA JSON (valid JSON that isn't a service account lands here too) | Re-store the SA JSON with the same command (`-U` replaces the item) |
+| `Keychain item not found` | Secret not stored, or different service/account names | Store it with `/sidekick:setup` ([Method 4](#method-4-service-account-in-apple-keychain-macos-only)), or fix the names there |
+| `Keychain value could not be decoded` / `not valid service account JSON` | The Keychain item holds something other than SA JSON (valid JSON that isn't a service account lands here too) | Store the SA key file again with `/sidekick:setup` (it replaces the item) |
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |
 | `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Paste the key on the **Gemini API key** row, then restart ([how](#change-settings--reconnect)) |
 | `'api_key_env' in config.json contains what looks like an API key` | The key itself was put in `api_key_env` | Set `api_key_env` to the variable name, e.g. `"GEMINI_API_KEY"` |

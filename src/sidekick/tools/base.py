@@ -35,6 +35,7 @@ from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
     GeminiClient,
+    Session,
     _is_retryable,
 )
 
@@ -324,10 +325,26 @@ async def call_gemini(
         system_instruction += _WEB_PREAMBLE
     records: list[ToolCallRecord] = []
 
-    async def _do_ask(use_model: Optional[str]) -> str:
-        session = client.get_or_create_session(name=f"{tool_name}:{session_name}", model=use_model)
-        return await client.ask(
-            session,
+    session = client.get_or_create_session(name=f"{tool_name}:{session_name}", model=model)
+
+    async def _do_ask(use_model: Optional[str] = None) -> str:
+        # The fallback answer belongs to the conversation the caller named (#122). Run it on a
+        # stand-in that sees the named session's turns, then commit the new turn back there, so
+        # the next call without model= continues from it and no fallback-model session appears.
+        target = (
+            session
+            if use_model is None
+            else Session(
+                model=client.resolve_model(use_model),
+                history=list(session.history),
+                name=session.name,
+            )
+        )
+        # Turns the stand-in starts with; anything past this index is this call's new turn,
+        # even if a concurrent call on the same session commits while the fallback runs.
+        base = len(target.history)
+        answer = await client.ask(
+            target,
             prompt,
             thinking,
             system_instruction=system_instruction,
@@ -335,6 +352,9 @@ async def call_gemini(
             records=records,
             web=caps.web,
         )
+        if target is not session:
+            session.history.extend(target.history[base:])
+        return answer
 
     fallback_at: Optional[int] = None  # records index where the fallback attempt began
 
@@ -364,7 +384,7 @@ async def call_gemini(
     fallback_model = client.fallback_model
     answered_by = requested_model
     try:
-        response = await _do_ask(model)
+        response = await _do_ask()
     except ClientError as exc:
         # If retryable and the model we tried is not already the fallback, retry once on it.
         # `model or client.default_model` reflects the model actually used — when the caller

@@ -7,6 +7,10 @@ Non-interactive setup for the sidekick plugin (#102). Replaces setup.sh.
 argv, so no answer is ever parsed as shell, python or JSON text. `status` gives the command
 the saved values to offer as defaults. Only the keys the wizard owns are changed (#85); the
 write is atomic (#95); an unreadable config is backed up under a timestamp (#96).
+
+`keychain-store` puts a service-account key file into the macOS Keychain (#123). It takes the
+file's PATH; this process reads the key and hands it to `security` on stdin, so the key never
+reaches argv (where `ps` sees it), the chat, or the model.
 """
 
 from __future__ import annotations
@@ -135,6 +139,121 @@ def _keychain_problem(service: str, account: str) -> Optional[str]:
     except (AuthError, ValueError, KeyError) as exc:
         return str(exc)
     return None
+
+
+# Keychain names go inside a single-quoted `security -i` command line, so allow no quoting
+# or escape characters at all. Real service/account names never need them.
+_KEYCHAIN_NAME = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
+# `security -i` reads one command per line and fails past ~4096 characters (measured on
+# macOS 27); stay well under so a key is refused rather than stored cut short.
+_SECURITY_LINE_MAX = 4000
+_SA_REQUIRED = ("private_key", "client_email", "token_uri")
+
+
+def _read_sa_key(file: Path) -> str:
+    """The key file as compact JSON, after checking it is a service-account key.
+
+    Raises SetupError. No message ever includes the file's contents."""
+    try:
+        info = json.loads(file.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise SetupError(f"No such file: {file}") from exc
+    except (ValueError, OSError) as exc:
+        raise SetupError(f"{file} is not a readable JSON key file ({type(exc).__name__}).") from exc
+    if not isinstance(info, dict) or info.get("type") != "service_account":
+        found = info.get("type") if isinstance(info, dict) else None
+        raise SetupError(
+            f"{file} is not a service-account key (type {found!r}, expected 'service_account')."
+        )
+    missing = [k for k in _SA_REQUIRED if not isinstance(info.get(k), str) or not info[k]]
+    if missing:
+        raise SetupError(f"{file} is missing service-account fields: {', '.join(missing)}.")
+    return json.dumps(info, separators=(",", ":"))
+
+
+def _security_store_line(service: str, account: str, secret: str) -> str:
+    """One `security -i` command that stores `secret`. Its parser treats backslash as an escape
+    even inside single quotes, so backslashes and quotes are escaped to round-trip exactly."""
+    escaped = secret.replace("\\", "\\\\").replace("'", "\\'")
+    return f"add-generic-password -U -s '{service}' -a '{account}' -w '{escaped}'\n"
+
+
+def _keychain_value(service: str, account: str) -> Optional[str]:
+    """The item's stored value, hex-decoded when macOS returns it that way; None if unreadable."""
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv
+            ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.rstrip("\n")
+    try:
+        return bytes.fromhex(raw).decode("utf-8")
+    except ValueError:
+        return raw
+
+
+def keychain_store(file: Path, service: str, account: str, delete_file: bool) -> dict[str, Any]:
+    """Store a service-account key file in the macOS Keychain, then read it back. Raises SetupError."""
+    if sys.platform != "darwin":
+        raise SetupError("Keychain storage requires macOS. Use adc, env or api_key here.")
+    for label, name in (("service", service), ("account", account)):
+        if not _KEYCHAIN_NAME.match(name):
+            raise SetupError(
+                f"Keychain {label} name must be 1-64 letters, digits, '.', '_', '@' or '-'."
+            )
+    file = file.expanduser()
+    secret = _read_sa_key(file)
+    line = _security_store_line(service, account, secret)
+    if len(line) > _SECURITY_LINE_MAX:
+        raise SetupError(
+            f"{file} is too large to store through the security tool "
+            f"({len(line)} > {_SECURITY_LINE_MAX} characters). Store it by hand; see docs/auth.md."
+        )
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv; the key goes on stdin only
+            ["security", "-i"], input=line, capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SetupError(f"Could not run the macOS security tool ({type(exc).__name__}).") from exc
+    # Never relay security's stderr: on a parse error it echoes the command line, key included.
+    if result.returncode != 0 or result.stderr.strip():
+        raise SetupError(
+            f"The security tool refused to store the key (exit {result.returncode}). "
+            "Nothing was written to config."
+        )
+    # The item must now hold exactly this key. A credentials check alone would pass on an
+    # older item at the same names, and --delete-file would then delete the only new copy.
+    if _keychain_value(service, account) != secret:
+        raise SetupError(
+            "The key was not stored: the Keychain item does not hold this file's key. "
+            "The file was kept."
+        )
+    problem = _keychain_problem(service, account)
+    if problem:
+        raise SetupError(f"Stored, but reading it back failed: {problem}")
+    deleted = False
+    if delete_file:
+        try:
+            file.unlink()
+            deleted = True
+        except OSError as exc:
+            raise SetupError(
+                f"Stored and verified, but {file} could not be deleted ({type(exc).__name__}). "
+                "Delete it yourself."
+            ) from exc
+    return {
+        "ok": True,
+        "keychain_service": service,
+        "keychain_account": account,
+        "file": str(file),
+        "file_deleted": deleted,
+    }
 
 
 def status(path: Path) -> dict[str, Any]:
@@ -280,6 +399,11 @@ def _parser() -> argparse.ArgumentParser:
     # cannot see, so the env-var checks are skipped.
     w.add_argument("--key-source", choices=["plugin", "env"], default="env")
     w.add_argument("--sa-file-source", choices=["plugin", "env"], default="env")
+    k = sub.add_parser("keychain-store")
+    k.add_argument("--file", type=Path, required=True)
+    k.add_argument("--keychain-service", default=DEFAULTS["keychain_service"])
+    k.add_argument("--keychain-account", default=DEFAULTS["keychain_account"])
+    k.add_argument("--delete-file", action="store_true")
     return p
 
 
@@ -289,7 +413,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(status(args.config), indent=2))
         return 0
     try:
-        result = write(args.config, args)
+        if args.command == "keychain-store":
+            result = keychain_store(
+                args.file, args.keychain_service, args.keychain_account, args.delete_file
+            )
+        else:
+            result = write(args.config, args)
     except SetupError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
         return 2

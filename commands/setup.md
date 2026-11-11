@@ -83,19 +83,23 @@ instead of a second one:
      export GOOGLE_APPLICATION_CREDENTIALS myself"
      (`checks.google_application_credentials` shows whether it is set here).
      On "Done", add `--sa-file-source 'plugin'` to the write.
-   - `keychain` — "Service account in macOS Keychain" (macOS only): this setup
-     can't store the key itself. Tell the user to run this in their own
-     terminal, never in this chat and never with `! ` in front:
+   - `keychain` — "Service account in macOS Keychain" (macOS only). Ask for
+     the service and account names (defaults `values.keychain_service`,
+     `values.keychain_account`). Then use AskUserQuestion: "Store a key file
+     now" or "Already stored". To store, ask for the PATH to the JSON key file,
+     only the path. Never read, cat or open the file yourself. If the answer is
+     JSON or a key rather than a path, treat it as a pasted key (see the top).
+     Then ask with AskUserQuestion: "Delete the file after storing
+     (Recommended)" or "Keep the file". Run:
 
-         security add-generic-password -U -s 'sidekick' -a 'vertex-sa' -w "$(cat /path/to/sa-key.json)"
+         UV_PROJECT_ENVIRONMENT="${CLAUDE_PLUGIN_DATA}/venv" uv run --frozen --quiet --project "${CLAUDE_PLUGIN_ROOT}" sidekick-setup keychain-store --file '…' --keychain-service '…' --keychain-account '…' [--delete-file]
 
-     then delete the JSON file. (The bare `-w` prompt form keeps the key off
-     the command line, but it takes one short line, so it can't hold the
-     multi-line JSON.) Use AskUserQuestion: "Stored" or "Already stored".
-     Then ask for the service and account names (defaults
-     `values.keychain_service`, `values.keychain_account`; they must match
-     the `-s` and `-a` used). If write fails with `Keychain item not found`,
-     show the store command from its error and ask again.
+     It reads the key itself, passes it to macOS `security` on stdin (never
+     on a command line), and reads it back to check that it works. Its output never
+     contains the key. On `"ok": false`, show `error` and ask again. macOS
+     may show a Keychain access prompt; tell the user to allow it.
+     If a later write fails with `Keychain item not found`, the names don't
+     match the stored item: ask again.
    Then ask for the GCP project ID and the location (default
    `values.location`; `global` recommended). Write `--auth-method '…'
    --project '…' --location '…'` plus the keychain names when used. Tell them

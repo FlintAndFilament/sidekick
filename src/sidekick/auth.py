@@ -130,34 +130,54 @@ def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
         raise AuthError(
             f"Gemini auth error: {source} points at a file that does not exist: {path}\n{_ENV_FIX}"
         )
+    # Not google.auth.load_credentials_from_file: it accepts any credential type, including an
+    # external-account config that makes google-auth fetch tokens from URLs the file names, and
+    # google-auth deprecates it for that reason. This method takes a service-account key only (#124).
     try:
-        # google-auth ships no annotation for this helper; the return type is documented.
-        loaded, _ = google.auth.load_credentials_from_file(  # type: ignore[no-untyped-call]
-            path, scopes=_VERTEX_SCOPES
-        )
-    except (google.auth.exceptions.GoogleAuthError, ValueError, OSError) as exc:
-        _log.error("env credential load failed: %s", exc)
+        with open(path, encoding="utf-8") as fh:
+            info = json.load(fh)
+    except (ValueError, OSError) as exc:
+        _log.error("env credential file unreadable: %s", type(exc).__name__)
         raise AuthError(
             f"Gemini auth error: the service-account file from {source} could not be loaded: "
-            f"{path}\n"
-            f"({exc})\n{_ENV_FIX}"
+            f"{path}\n(it is not readable JSON: {type(exc).__name__})\n{_ENV_FIX}"
+        ) from exc
+    cred_type = info.get("type") if isinstance(info, dict) else None
+    if cred_type != "service_account":
+        _log.error("env credential file is type %r, not service_account", cred_type)
+        raise AuthError(
+            f"Gemini auth error: the file from {source} is not a service-account key "
+            f"(its type is {cred_type!r}, expected 'service_account'): {path}\n{_ENV_FIX}"
+        )
+    try:
+        loaded = _service_account_credentials(info)
+    except (google.auth.exceptions.GoogleAuthError, ValueError, KeyError, TypeError) as exc:
+        _log.error("env credential load failed: %s", type(exc).__name__)
+        raise AuthError(
+            f"Gemini auth error: the service-account file from {source} could not be loaded: "
+            f"{path}\n({type(exc).__name__}: the key is missing or has a malformed field)\n"
+            f"{_ENV_FIX}"
         ) from exc
     _log.debug("env credentials loaded from %s", path)
-    return cast(google.auth.credentials.Credentials, loaded)
+    return loaded
+
+
+def _service_account_credentials(info: dict[str, object]) -> google.auth.credentials.Credentials:
+    """Agent Platform credentials from parsed service-account key JSON (env and keychain)."""
+    # google-auth ships no annotation for this constructor; the return type is documented.
+    creds = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
+        info, scopes=_VERTEX_SCOPES
+    )
+    return cast(google.auth.credentials.Credentials, creds)
 
 
 def _keychain_store_fix(service: str, account: str) -> str:
-    """How to (re-)store the SA JSON by hand; /sidekick:setup can't store it yet (#123).
-
-    `-w` with no value would prompt instead of putting the JSON on argv, but the prompt reads a
-    single line (and a terminal line caps at 1024 bytes), so a multi-line SA key can't go through
-    it. `$(cat …)` is on argv only while `security` runs; the hex decode below reads it back."""
+    """How to (re-)store the SA JSON: /sidekick:setup stores it from a file path (#123)."""
     return (
-        "Fix: store the service account key from a terminal (never paste it into the chat):\n"
-        f"  security add-generic-password -U -s '{service}' -a '{account}' "
-        '-w "$(cat /path/to/sa-key.json)"\n'
-        "then delete the JSON file and run /reload-plugins in Claude Code. "
-        "See docs/auth.md, Method 3: Apple Keychain."
+        "Fix: run /sidekick:setup, choose Google Cloud Agent Platform, then Service account in "
+        f"macOS Keychain, and give it the key file's path (service '{service}', account "
+        f"'{account}'). Never paste the key into the chat. Then run /reload-plugins. "
+        "See docs/auth.md, Method 4: Apple Keychain."
     )
 
 
@@ -209,7 +229,7 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
     _log.debug("keychain credentials loaded (service=%r, account=%r)", service, account)
 
     try:
-        return service_account.Credentials.from_service_account_info(sa_info, scopes=_VERTEX_SCOPES)
+        return _service_account_credentials(sa_info)
     # Valid JSON that is not a service account (or lacks fields) raises these, not AuthError.
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         _log.error("keychain value is not a service account (%s)", type(exc).__name__)

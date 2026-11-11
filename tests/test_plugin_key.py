@@ -106,14 +106,19 @@ def test_setup_server_stays_up_and_explains() -> None:
     assert tools == {"setup_status"}
 
 
+def _sa_json(path: Path) -> str:
+    """A service-account-typed file that names itself, so the loader can report which one."""
+    return json.dumps({"type": "service_account", "path": str(path)})
+
+
 def _fake_sa_loader(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     loaded: list[str] = []
 
-    def load(path: str, scopes: object = None) -> tuple[object, str]:
-        loaded.append(path)
-        return object(), "project"
+    def load(info: dict[str, str], scopes: object = None) -> object:
+        loaded.append(info["path"])
+        return object()
 
-    monkeypatch.setattr("google.auth.load_credentials_from_file", load)
+    monkeypatch.setattr("google.oauth2.service_account.Credentials.from_service_account_info", load)
     return loaded
 
 
@@ -121,8 +126,8 @@ def test_plugin_sa_file_wins_over_shell_var(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     picked, exported = tmp_path / "picked.json", tmp_path / "exported.json"
-    picked.write_text("{}")
-    exported.write_text("{}")
+    picked.write_text(_sa_json(picked))
+    exported.write_text(_sa_json(exported))
     monkeypatch.setenv("SIDEKICK_SA_FILE", str(picked))
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(exported))
     loaded = _fake_sa_loader(monkeypatch)
@@ -134,7 +139,7 @@ def test_unset_sa_file_option_falls_back_to_shell_var(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     exported = tmp_path / "exported.json"
-    exported.write_text("{}")
+    exported.write_text(_sa_json(exported))
     monkeypatch.setenv("SIDEKICK_SA_FILE", "${user_config.service_account_file}")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(exported))
     loaded = _fake_sa_loader(monkeypatch)

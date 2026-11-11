@@ -192,6 +192,50 @@ class TestCallGemini:
         assert FALLBACK_MODEL in result
         assert "fallback answer" in result
 
+    async def test_fallback_turn_lands_in_requested_session(self, tmp_path: Path) -> None:
+        # #122: the fallback answer is part of the conversation the caller named. It must be
+        # recorded in the requested model's session (so the next call without model= sees it),
+        # the fallback attempt must see that session's earlier turns, and no separate
+        # fallback-model session may appear.
+        from sidekick.client import DEFAULT_MODEL, FALLBACK_MODEL
+
+        client = _make_client()
+        busy = Exception("503 UNAVAILABLE model overloaded")
+        gen = _mock_generate(
+            client,
+            side_effect=[_text_response("first answer")]
+            + [busy] * 4
+            + [_text_response("fallback answer"), _text_response("third answer")],
+        )
+        transcript = _make_transcript(tmp_path)
+
+        async def call(prompt: str) -> str:
+            return await call_gemini(
+                client=client,
+                transcript=transcript,
+                tool_name="ask",
+                session_name="s",
+                system_instruction="Answer.",
+                prompt=prompt,
+                thinking="low",
+            )
+
+        with patch("sidekick.client.asyncio.sleep", new=AsyncMock()):
+            await call("one")
+            assert "[sidekick notice]" in await call("two")
+            # The fallback request carried the earlier turn as context.
+            fallback_call = gen.call_args_list[5]
+            assert fallback_call.kwargs["model"] == FALLBACK_MODEL
+            assert len(fallback_call.kwargs["contents"]) == 3  # one, first answer, two
+            await call("three")
+
+        sessions = client.sessions()
+        assert [s.model for s in sessions] == [DEFAULT_MODEL]
+        assert len(sessions[0].history) == 6  # three prompts + three answers
+        # The third call went back to the requested model with all prior turns.
+        assert gen.call_args.kwargs["model"] == DEFAULT_MODEL
+        assert len(gen.call_args.kwargs["contents"]) == 5
+
 
 class TestToolRegistration:
     def test_all_tools_register_without_error(self, tmp_path: Path) -> None:

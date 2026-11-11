@@ -101,7 +101,9 @@ Plugin options arrive as env (`SIDEKICK_API_KEY`, `SIDEKICK_SA_FILE`, set in `pl
 8. On success only, the prompt and final answer are committed to the session history.
 9. If the call failed with a terminal 503/429 and the model was not already the fallback,
    `call_gemini()` retries once on the newest Flash-Lite and prefixes a disclosure notice.
-   It does not retry if `write_file` already succeeded in this call.
+   It does not retry if `write_file` already succeeded in this call. The retry sees the named
+   session's earlier turns, and its answer is committed to that same session, so the next call
+   without `model=` continues from it (#122).
 10. `resolve_redirects()` turns grounding redirect links into real URLs (HEAD only, no Gemini
     tokens), and `sources_footer()` appends up to 30 sources to the reply. The transcript
     gets the full list. When the answer itself contains URLs, the footer opens with a caution

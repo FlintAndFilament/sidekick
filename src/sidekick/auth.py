@@ -38,7 +38,13 @@ import google.auth.credentials
 import google.auth.exceptions
 from google.oauth2 import service_account
 
-from sidekick.config import AuthConfig, ConfigError, plugin_api_key
+from sidekick.config import (
+    PLUGIN_SA_FILE_VAR,
+    AuthConfig,
+    ConfigError,
+    plugin_api_key,
+    plugin_option,
+)
 
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
@@ -73,29 +79,37 @@ def _load_adc(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
 
 
 _ENV_CREDENTIALS_VAR = "GOOGLE_APPLICATION_CREDENTIALS"
-_ENV_FIX = f"Fix: export {_ENV_CREDENTIALS_VAR}=/path/to/sa-key.json"
+_ENV_FIX = (
+    "Fix: in Claude Code type /plugin, open Installed → sidekick → Configure options and pick "
+    "the file in **Service-account key file**, then /mcp → Reconnect. "
+    f"(Or set {_ENV_CREDENTIALS_VAR} in the environment Claude Code starts from.)"
+)
 
 
 def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
-    """Load credentials from the file named by GOOGLE_APPLICATION_CREDENTIALS.
+    """Load credentials from the plugin's file option, else GOOGLE_APPLICATION_CREDENTIALS.
 
     The variable and the file are checked here, and the file is then loaded explicitly, because
     google.auth.default() falls back to the user's gcloud ADC when the variable is unset. That
     fallback would silently run the server as the user instead of the configured service
     account, and only fail if ADC were missing too (#86).
     """
-    path = os.environ.get(_ENV_CREDENTIALS_VAR, "").strip()
+    from_plugin = plugin_option(PLUGIN_SA_FILE_VAR)
+    path = from_plugin or os.environ.get(_ENV_CREDENTIALS_VAR, "").strip()
+    source = "the plugin's service-account file option" if from_plugin else _ENV_CREDENTIALS_VAR
     if not path:
-        _log.error("%s is not set", _ENV_CREDENTIALS_VAR)
-        raise AuthError(
-            f"Gemini auth error: auth method is 'env' but {_ENV_CREDENTIALS_VAR} is not set.\n"
-            f"{_ENV_FIX}"
+        _log.error(
+            "no service-account file: plugin option unset and %s not set", _ENV_CREDENTIALS_VAR
         )
-    if not os.path.isfile(path):
-        _log.error("%s points at a missing file: %s", _ENV_CREDENTIALS_VAR, path)
         raise AuthError(
-            f"Gemini auth error: {_ENV_CREDENTIALS_VAR} points at a file that does not "
-            f"exist: {path}\n{_ENV_FIX}"
+            "Gemini auth error: auth method is 'env' but no service-account key file is set "
+            f"(plugin option empty, {_ENV_CREDENTIALS_VAR} not set).\n{_ENV_FIX}"
+        )
+    path = os.path.expanduser(path)
+    if not os.path.isfile(path):
+        _log.error("%s points at a missing file: %s", source, path)
+        raise AuthError(
+            f"Gemini auth error: {source} points at a file that does not exist: {path}\n{_ENV_FIX}"
         )
     try:
         # google-auth ships no annotation for this helper; the return type is documented.
@@ -105,7 +119,8 @@ def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
     except (google.auth.exceptions.GoogleAuthError, ValueError, OSError) as exc:
         _log.error("env credential load failed: %s", exc)
         raise AuthError(
-            f"Gemini auth error: {_ENV_CREDENTIALS_VAR} file could not be loaded: {path}\n"
+            f"Gemini auth error: the service-account file from {source} could not be loaded: "
+            f"{path}\n"
             f"({exc})\n{_ENV_FIX}"
         ) from exc
     _log.debug("env credentials loaded from %s", path)

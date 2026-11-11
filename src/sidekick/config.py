@@ -37,6 +37,9 @@ CONFIG_PATH: Path = Path.home() / ".config" / "sidekick" / "config.json"
 # value in the OS credential store (Keychain on macOS) and hands it to the server under this
 # name. Deliberately not GEMINI_API_KEY: a plugin env entry would shadow a real shell export.
 PLUGIN_API_KEY_VAR = "SIDEKICK_API_KEY"
+# The plugin's "Service-account key file" picker, for auth.method="env". Not
+# GOOGLE_APPLICATION_CREDENTIALS, for the same no-shadowing reason.
+PLUGIN_SA_FILE_VAR = "SIDEKICK_SA_FILE"
 
 ThinkingLevel = Literal["none", "low", "medium", "high"]
 AuthMethod = Literal["adc", "env", "keychain", "api_key"]
@@ -109,15 +112,20 @@ class Config(BaseModel):
         return self
 
 
-def plugin_api_key() -> Optional[str]:
-    """The key saved in the plugin's options, or None when that option is unset.
+def plugin_option(var: str) -> Optional[str]:
+    """A plugin option's value as passed in the server env, or None when it is unset.
 
     An unset option may arrive as "" or, on some builds, as the literal `${user_config.…}`
     placeholder; both mean "not configured here"."""
-    value = os.environ.get(PLUGIN_API_KEY_VAR, "").strip()
+    value = os.environ.get(var, "").strip()
     if not value or value.startswith("${"):
         return None
     return value
+
+
+def plugin_api_key() -> Optional[str]:
+    """The key saved in the plugin's masked API key option, or None."""
+    return plugin_option(PLUGIN_API_KEY_VAR)
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:

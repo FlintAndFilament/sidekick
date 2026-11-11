@@ -32,7 +32,7 @@ written to the log (see [logging.md](logging.md)); the messages are listed in
 |---|---|---|
 | **A. API key in the keychain** (recommended) | Paste a Google AI Studio key into the plugin's masked **Gemini API key** option | none |
 | **B. API key from an env var** | Export the key yourself (CI, scripts, Linux, Windows) | yes |
-| **C. Google Cloud Agent Platform** | gcloud login (ADC), a service-account file, or a service account in macOS Keychain, plus a GCP project | ADC: none; file: one env var |
+| **C. Google Cloud Agent Platform** | gcloud login (ADC), a service-account file (picked in the plugin options), or a service account in macOS Keychain, plus a GCP project | none |
 
 To change or reset anything later, run `/sidekick:setup` again. To replace the key, use `/plugin`
 → **Installed** → sidekick → **Configure options**. Then reconnect with `/mcp` → `plugin:sidekick:mcp`
@@ -93,35 +93,33 @@ already have ADC set up.
 
 ## Method 2: Env File SA
 
-Use a service account key file on disk. Set the environment variable **before starting Claude Code** — the server reads it at startup:
+Use a service account key file on disk. Pick it in the plugin's options: `/plugin` →
+**Installed** → sidekick → **Configure options** → **Service-account key file**. Claude Code
+passes the path to the server as `SIDEKICK_SA_FILE`. No shell export is needed, and it works
+however Claude Code is started.
 
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json
-```
+If you already export `GOOGLE_APPLICATION_CREDENTIALS` in the environment Claude Code starts
+from, you can leave the picker blank and that variable is used. If both are set, the picker
+wins.
 
-The server reads `GOOGLE_APPLICATION_CREDENTIALS` itself and loads that file explicitly. It
-never falls back to your ADC user credentials: an unset variable or a missing file stops
-startup with a message naming the problem (#86), so this method can no longer run the server
-as you instead of the service account. The plugin's MCP server inherits Claude Code's
-environment directly, so export the variable in the shell **profile** of the shell that starts
-Claude Code (e.g. `~/.zshrc`) — a one-off `export` in the current shell won't reach a
-subsequent Claude Code launch.
+The server loads the chosen file explicitly. It never falls back to your ADC user credentials:
+no file, or a missing file, starts the server in setup mode with a message naming the problem
+(#86), so this method can't run the server as you instead of the service account.
 
 **Setup steps:**
 1. Create or download a service account key in GCP IAM → Service Accounts → Keys
 2. Grant the SA `roles/aiplatform.user` on your project
 3. Store the JSON file in a secure location (e.g. `~/.config/sidekick/sa-key.json`, mode 600)
-4. Export the env var in your shell profile
-5. Run `/sidekick:setup` and choose `env`
+4. Run `/sidekick:setup`, choose Google Cloud Agent Platform → "Service-account key file", and
+   pick the file when it sends you to **Configure options**
 
 **Auth block written by `/sidekick:setup`** (alongside `project` and `location`):
 ```json
 {"auth": {"method": "env"}}
 ```
 
-`/sidekick:setup` checks the env var in its own shell. If it is set but the file does not exist,
-setup stops with an error. If it is not set, it warns but continues — you can set it later before
-starting Claude Code.
+If you use the env var instead, `/sidekick:setup` checks it in its own shell. If it is set but
+the file does not exist, setup stops with an error.
 
 **Caution:** The key file persists on disk. Use only on full-disk-encrypted machines with restricted file permissions (`chmod 600`).
 
@@ -234,7 +232,7 @@ once to the newest Flash-Lite (see [configuration.md](configuration.md#choosing-
 | `no ADC credentials found` | ADC not configured | `gcloud auth application-default login` |
 | Token refresh / `invalid_grant` errors on a call | ADC refresh token expired or revoked | `gcloud auth application-default login` |
 | `403 PERMISSION_DENIED: quota project not set` | ADC user credentials have no quota project | `gcloud auth application-default set-quota-project YOUR_PROJECT_ID` |
-| `auth method is 'env' but GOOGLE_APPLICATION_CREDENTIALS is not set` / `points at a file that does not exist` / `file could not be loaded` | `env` method: the variable is unset, names a missing file, or names a file google-auth cannot read. ADC is never used as a fallback | Export it in the shell profile of the shell that starts Claude Code, e.g. `export GOOGLE_APPLICATION_CREDENTIALS=...`, then restart Claude Code; check the path and the file's contents |
+| `auth method is 'env' but no service-account key file is set` / `points at a file that does not exist` / `could not be loaded` | `env` method: no file picked and `GOOGLE_APPLICATION_CREDENTIALS` unset, a missing file, or a file google-auth cannot read. ADC is never used as a fallback | Pick the file in `/plugin` → Installed → sidekick → Configure options → **Service-account key file**, then `/mcp` → Reconnect; check the file's contents |
 | `Keychain item not found` | Secret not stored | Re-run the `security add-generic-password` command |
 | `not valid service account JSON` | Keychain value corrupted | Re-store the SA JSON key |
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |

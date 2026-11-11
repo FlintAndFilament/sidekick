@@ -68,9 +68,12 @@ instead of a second one:
      (https://cloud.google.com/sdk/docs/install), then run
      `gcloud auth application-default login` with `! ` in front so it runs
      here.
-   - `env` — "Service-account key file": the file's path must be in
-     `GOOGLE_APPLICATION_CREDENTIALS` (`checks.google_application_credentials`
-     shows whether it is set).
+   - `env` — "Service-account key file". Tell the user: "Type `/plugin`, open
+     the Installed tab, select sidekick, choose **Configure options**, and on
+     the **Service-account key file** row pick or paste the path to the JSON
+     key, then press Enter to save." Then use AskUserQuestion: "Done" or "I
+     export GOOGLE_APPLICATION_CREDENTIALS myself"
+     (`checks.google_application_credentials` shows whether it is set here).
    - `keychain` — "Service account in macOS Keychain" (macOS only): ask for the
      service and account names (defaults `values.keychain_service`,
      `values.keychain_account`).

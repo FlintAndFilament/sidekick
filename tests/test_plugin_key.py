@@ -102,3 +102,65 @@ def test_setup_server_stays_up_and_explains() -> None:
     assert "/sidekick:setup" in setup_needed_text("x")
     tools = {t.name for t in server._tool_manager.list_tools()}
     assert tools == {"setup_status"}
+
+
+def _fake_sa_loader(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    loaded: list[str] = []
+
+    def load(path: str, scopes: object = None) -> tuple[object, str]:
+        loaded.append(path)
+        return object(), "project"
+
+    monkeypatch.setattr("google.auth.load_credentials_from_file", load)
+    return loaded
+
+
+def test_plugin_sa_file_wins_over_shell_var(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    picked, exported = tmp_path / "picked.json", tmp_path / "exported.json"
+    picked.write_text("{}")
+    exported.write_text("{}")
+    monkeypatch.setenv("SIDEKICK_SA_FILE", str(picked))
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(exported))
+    loaded = _fake_sa_loader(monkeypatch)
+    build_auth(AuthConfig(method="env"))
+    assert loaded == [str(picked)]
+
+
+def test_unset_sa_file_option_falls_back_to_shell_var(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    exported = tmp_path / "exported.json"
+    exported.write_text("{}")
+    monkeypatch.setenv("SIDEKICK_SA_FILE", "${user_config.service_account_file}")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(exported))
+    loaded = _fake_sa_loader(monkeypatch)
+    build_auth(AuthConfig(method="env"))
+    assert loaded == [str(exported)]
+
+
+def test_missing_sa_file_points_at_the_picker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    with pytest.raises(AuthError) as err:
+        build_auth(AuthConfig(method="env"))
+    assert "Service-account key file" in str(err.value)
+    assert "Configure options" in str(err.value)
+
+
+def test_picked_file_that_vanished_names_the_plugin_option(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SIDEKICK_SA_FILE", str(tmp_path / "gone.json"))
+    with pytest.raises(AuthError, match="plugin's service-account file option"):
+        build_auth(AuthConfig(method="env"))
+
+
+def test_manifest_declares_the_sa_file_picker() -> None:
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    option = plugin["userConfig"]["service_account_file"]
+    assert option["type"] == "file"
+    assert option.get("required", False) is False
+    env = plugin["mcpServers"]["mcp"]["env"]
+    assert env["SIDEKICK_SA_FILE"] == "${user_config.service_account_file}"
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in env

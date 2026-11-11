@@ -12,6 +12,11 @@
       "title": "Gemini API key",
       "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get a free key at aistudio.google.com/apikey. Stored in your system keychain. Leave blank for Google Cloud Agent Platform or a shell-exported key.",
       "sensitive": true
+    },
+    "service_account_file": {
+      "type": "file",
+      "title": "Service-account key file",
+      "description": "Only for Google Cloud Agent Platform with a service account: pick its JSON key file. Leave blank for an API key or gcloud login."
     }
   },
   "mcpServers": {
@@ -28,7 +33,8 @@
       "env": {
         "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
         "PYTHONUNBUFFERED": "1",
-        "SIDEKICK_API_KEY": "${user_config.gemini_api_key}"
+        "SIDEKICK_API_KEY": "${user_config.gemini_api_key}",
+        "SIDEKICK_SA_FILE": "${user_config.service_account_file}"
       }
     }
   }

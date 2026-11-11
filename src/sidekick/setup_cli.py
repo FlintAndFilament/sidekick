@@ -191,14 +191,17 @@ def _merge(config: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, 
                 "The API key env var must be a variable NAME like GEMINI_API_KEY, not the key itself."
             )
         auth["api_key_env"] = name
-        if not os.environ.get(name, "").strip():
+        # The plugin's key option is invisible here (plugin env reaches only the MCP server,
+        # not the Bash tool), so a plugin-sourced key must not trigger env-var advice (#116).
+        if args.key_source != "plugin" and not os.environ.get(name, "").strip():
             warnings.append(
-                f"{name} is not set. Export it in your shell profile, then restart Claude Code."
+                f"{name} is not set here. Set it in the environment Claude Code starts from, or put "
+                "the key in the plugin's Gemini API key option instead."
             )
     elif method == "adc":
         if not _adc_ok():
             raise SetupError("ADC is not configured. Run: gcloud auth application-default login")
-    elif method == "env":
+    elif method == "env" and args.sa_file_source != "plugin":
         creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
         if not creds:
             warnings.append(
@@ -273,6 +276,10 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--keychain-service")
     w.add_argument("--keychain-account")
     w.add_argument("--api-key-env")
+    # Where the secret comes from. "plugin" = the plugin's own options, which this process
+    # cannot see, so the env-var checks are skipped.
+    w.add_argument("--key-source", choices=["plugin", "env"], default="env")
+    w.add_argument("--sa-file-source", choices=["plugin", "env"], default="env")
     return p
 
 

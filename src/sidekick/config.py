@@ -141,6 +141,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         raw = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise ConfigError(f"Config file is not valid JSON ({path}): {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"Config file could not be read ({path}): {exc.strerror}") from exc
     if isinstance(raw, dict) and plugin_api_key() is not None:
         auth = raw.get("auth")
         if not (isinstance(auth, dict) and "method" in auth):

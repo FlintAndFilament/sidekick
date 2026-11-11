@@ -118,8 +118,12 @@ no file, or a missing file, starts the server in setup mode with a message namin
 {"auth": {"method": "env"}}
 ```
 
-If you use the env var instead, `/sidekick:setup` checks it in its own shell. If it is set but
-the file does not exist, setup stops with an error.
+If you use the env var instead of the picker, `/sidekick:setup` checks it in its own shell. If
+it is set but the file does not exist, setup stops with an error. With the picker, setup skips
+that check, since only the server can see the picked path.
+
+If the picker holds something that isn't a path (a pasted API key or key JSON), the server
+refuses it without showing or logging it.
 
 **Caution:** The key file persists on disk. Use only on full-disk-encrypted machines with restricted file permissions (`chmod 600`).
 

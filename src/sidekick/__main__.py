@@ -125,6 +125,18 @@ def _serve_setup_problem(problem: str) -> None:
 
 
 def main() -> None:
+    try:
+        _start()
+    except Exception as exc:  # noqa: BLE001 - last resort: never leave only "Connection closed"
+        # Type name only: an unexpected message could carry anything, secrets included.
+        _log.exception("startup failed — unexpected error")
+        _serve_setup_problem(
+            f"Unexpected startup error ({type(exc).__name__}). Details are in the sidekick log "
+            "(~/.config/sidekick/logs/)."
+        )
+
+
+def _start() -> None:
     startup_time = _startup_time
 
     from sidekick.auth import AuthError, build_auth

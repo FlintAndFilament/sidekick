@@ -8,6 +8,11 @@ what the user does next. Never ask for the key itself, never ask the user to pas
 it into the chat, and never read, print or store its value. The key only ever goes
 into Claude Code's own masked plugin prompt.
 
+If any answer looks like a key (starts with `AIza`, or is long mixed-case text,
+or is JSON with `private_key`), never put it in a command, never repeat it, and
+don't use it. Tell the user it was a key and that it belongs in the plugin's
+masked option (path A), and suggest rotating it, since it is now in this chat.
+
 Run every setup command exactly like this, so it uses the server's own venv
 instead of a second one:
 
@@ -53,7 +58,7 @@ instead of a second one:
    a prompt; it just closes. The key shows masked except its last few
    characters. Press Enter to save. It is stored in your keychain. Get a key
    at https://aistudio.google.com/apikey." Then use
-   AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key'`.
+   AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key' --key-source 'plugin'`.
    To change or replace the key later, the user repeats the same `/plugin` steps.
 
    **B. Env var.** Ask for the NAME of the variable (default
@@ -74,6 +79,7 @@ instead of a second one:
      key, then press Enter to save." Then use AskUserQuestion: "Done" or "I
      export GOOGLE_APPLICATION_CREDENTIALS myself"
      (`checks.google_application_credentials` shows whether it is set here).
+     On "Done", add `--sa-file-source 'plugin'` to the write.
    - `keychain` — "Service account in macOS Keychain" (macOS only): ask for the
      service and account names (defaults `values.keychain_service`,
      `values.keychain_account`).
@@ -94,12 +100,16 @@ instead of a second one:
 6. Run write with only the answers actually given, quoting every value in
    single quotes:
 
-       UV_PROJECT_ENVIRONMENT="${CLAUDE_PLUGIN_DATA}/venv" uv run --frozen --quiet --project "${CLAUDE_PLUGIN_ROOT}" sidekick-setup write --auth-method '…' [--project '…'] [--location '…'] [--thinking '…'] [--default-model '…'] [--transcript-dir '…'] [--keychain-service '…'] [--keychain-account '…'] [--api-key-env '…']
+       UV_PROJECT_ENVIRONMENT="${CLAUDE_PLUGIN_DATA}/venv" uv run --frozen --quiet --project "${CLAUDE_PLUGIN_ROOT}" sidekick-setup write --auth-method '…' [--project '…'] [--location '…'] [--thinking '…'] [--default-model '…'] [--transcript-dir '…'] [--keychain-service '…'] [--keychain-account '…'] [--api-key-env '…'] [--key-source 'plugin'] [--sa-file-source 'plugin']
 
    On `"ok": false`, show `error` and offer to retry from step 3. Otherwise
    show any `warnings`, and show `backup`'s path if it is non-null.
 7. Tell the user to run `/mcp`, select `plugin:sidekick:mcp` and choose
    **Reconnect** (or restart Claude Code), then say "done". Then verify: call
-   the `list_models` tool. If it returns models, say setup is complete. If only
-   `setup_status` exists, call it, show the problem in one line, and go back to
-   the step it points to.
+   the `list_models` tool with `refresh=true`.
+   - If only `setup_status` exists, call it, show the problem in one line, and
+     go back to the step it points to.
+   - If the reply starts with `[sidekick notice] Live model list unavailable`,
+     the credentials did not work (wrong or revoked key, missing IAM role).
+     Show the reason in one line and go back to step 4.
+   - Otherwise setup is complete; say so in one line.

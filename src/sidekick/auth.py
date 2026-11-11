@@ -86,6 +86,15 @@ _ENV_FIX = (
 )
 
 
+def _not_a_path(value: str) -> bool:
+    """True for secret-shaped text where a file path belongs: an API key or pasted key JSON."""
+    return (
+        value.startswith("AIza")
+        or any(marker in value for marker in ("{", "\n", "private_key", "BEGIN "))
+        or len(value) > 1024
+    )
+
+
 def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
     """Load credentials from the plugin's file option, else GOOGLE_APPLICATION_CREDENTIALS.
 
@@ -104,6 +113,15 @@ def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
         raise AuthError(
             "Gemini auth error: auth method is 'env' but no service-account key file is set "
             f"(plugin option empty, {_ENV_CREDENTIALS_VAR} not set).\n{_ENV_FIX}"
+        )
+    if _not_a_path(path):
+        # Never echo it: a mis-pasted API key or SA JSON would land in the log, in setup_status
+        # and so in the model's context (#116).
+        _log.error("%s holds something that is not a file path (value withheld)", source)
+        raise AuthError(
+            f"Gemini auth error: {source} holds something that isn't a file path (it looks like "
+            "a key or key JSON, so it is not shown). Clear it and pick the JSON key file "
+            "instead.\n" + _ENV_FIX
         )
     path = os.path.expanduser(path)
     if not os.path.isfile(path):
@@ -175,7 +193,15 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
 
     _log.debug("keychain credentials loaded (service=%r, account=%r)", service, account)
 
-    return service_account.Credentials.from_service_account_info(sa_info, scopes=_VERTEX_SCOPES)
+    try:
+        return service_account.Credentials.from_service_account_info(sa_info, scopes=_VERTEX_SCOPES)
+    # Valid JSON that is not a service account (or lacks fields) raises these, not AuthError.
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        _log.error("keychain value is not a service account (%s)", type(exc).__name__)
+        raise AuthError(
+            "Gemini auth error: Keychain value is not valid service account JSON.\n"
+            "Fix: run /sidekick:setup in Claude Code to re-store the service account key."
+        ) from exc
 
 
 def _looks_like_api_key(value: str) -> bool:

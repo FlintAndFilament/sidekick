@@ -213,7 +213,7 @@ Largest content a single `write_file` call may write. The tool descriptions quot
 ### `auth.method`
 
 **Type:** string
-**Default:** `"adc"`
+**Default:** `"adc"`, or `"api_key"` when the plugin's **Gemini API key** option is filled in
 **Valid values:** `adc`, `env`, `keychain`, `api_key`
 
 See [auth.md](auth.md) for full setup instructions for each method.
@@ -252,11 +252,12 @@ If the plugin's **Gemini API key** option is filled in, that key is used and thi
 not read. Otherwise the server reads the key from this variable at startup. If it is unset or
 empty, the server starts in setup mode and `setup_status` explains the fix. If the value
 looks like a key rather than a name (starts with `AIza`, contains lowercase letters, or is longer
-than 40 characters), startup fails with a message telling you to put the variable name here.
+than 40 characters), the server starts in setup mode with a message telling you to put the
+variable name here.
 
 Common values: `"GEMINI_API_KEY"` (AI Studio default), `"GOOGLE_API_KEY"` (alternative).
-The bridge reads only the variable named here and passes that key to the SDK explicitly, so a
-second key variable in your environment is not used.
+The bridge reads only the plugin option and the variable named here, and passes that key to the
+SDK explicitly, so any other key variable in your environment is not used.
 
 ---
 

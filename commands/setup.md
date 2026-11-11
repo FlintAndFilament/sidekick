@@ -48,9 +48,11 @@ instead of a second one:
 4. Follow the chosen path:
 
    **A. Keychain.** Tell the user, in these words: "Type `/plugin`, open the
-   Installed tab, select sidekick, choose **Configure options**, and paste your
-   key into **Gemini API key**. The input is masked and stored in your
-   keychain. Get a key at https://aistudio.google.com/apikey." Then use
+   Installed tab, select sidekick, choose **Configure options**. On the **Gemini API key**
+   row, paste your key directly. Pressing Enter on an empty row does not open
+   a prompt; it just closes. The key shows masked except its last few
+   characters. Press Enter to save. It is stored in your keychain. Get a key
+   at https://aistudio.google.com/apikey." Then use
    AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key'`.
    To change or replace the key later, the user repeats the same `/plugin` steps.
 

@@ -10,7 +10,7 @@
     "gemini_api_key": {
       "type": "string",
       "title": "Gemini API key",
-      "description": "Google AI Studio key (aistudio.google.com/apikey). Stored in your system keychain, never in settings files. Leave blank if you use Google Cloud Agent Platform or export the key yourself.",
+      "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get a free key at aistudio.google.com/apikey. Stored in your system keychain. Leave blank for Google Cloud Agent Platform or a shell-exported key.",
       "sensitive": true
     }
   },

@@ -175,7 +175,10 @@ The simplest path: no GCP project, no `gcloud`, no service account. Get a key fr
 
 **Path A: keychain (recommended).** The plugin declares a masked **Gemini API key** option.
 Claude Code asks for it when you install or enable the plugin in `/plugin`, and you can set or
-change it any time from `/plugin` → **Installed** → sidekick → **Configure options**. From a
+change it any time from `/plugin` → **Installed** → sidekick → **Configure options**. On the
+**Gemini API key** row, paste the key directly: no separate prompt opens, and Enter on an
+empty row just closes the dialog. The key shows masked except its last few characters. Press
+Enter to save. From a
 terminal, `claude plugin configure sidekick@sidekick` shows whether it is set. It never prints
 the value. Claude Code stores the value in the system keychain (macOS Keychain; a protected
 credentials file on other platforms), never in `settings.json`, and passes it to sidekick's

@@ -2,13 +2,40 @@
   "name": "sidekick",
   "version": "0.4.0",
   "description": "A second opinion from Google Gemini inside Claude Code: review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
-  "author": { "name": "FlintAndFilament" },
+  "author": {
+    "name": "FlintAndFilament"
+  },
   "repository": "https://github.com/FlintAndFilament/sidekick",
+  "userConfig": {
+    "gemini_api_key": {
+      "type": "string",
+      "title": "Gemini API key",
+      "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get a free key at aistudio.google.com/apikey. Stored in your system keychain. Leave blank for Google Cloud Agent Platform or a shell-exported key.",
+      "sensitive": true
+    },
+    "service_account_file": {
+      "type": "file",
+      "title": "Service-account key file",
+      "description": "Only for Google Cloud Agent Platform with a service account: pick its JSON key file. Leave blank for an API key or gcloud login."
+    }
+  },
   "mcpServers": {
     "mcp": {
       "command": "uv",
-      "args": ["run", "--frozen", "--quiet", "--project", "${CLAUDE_PLUGIN_ROOT}", "sidekick"],
-      "env": { "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv", "PYTHONUNBUFFERED": "1" }
+      "args": [
+        "run",
+        "--frozen",
+        "--quiet",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "sidekick"
+      ],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
+        "PYTHONUNBUFFERED": "1",
+        "SIDEKICK_API_KEY": "${user_config.gemini_api_key}",
+        "SIDEKICK_SA_FILE": "${user_config.service_account_file}"
+      }
     }
   }
 }

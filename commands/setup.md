@@ -8,7 +8,7 @@ what the user does next. Never ask for the key itself, never ask the user to pas
 it into the chat, and never read, print or store its value. The key only ever goes
 into Claude Code's own masked plugin prompt.
 
-If any answer looks like a key (starts with `AIza`, or is long mixed-case text,
+If any answer looks like a key (starts with `AIza` or `AQ`, or is long mixed-case text,
 or is JSON with `private_key`), never put it in a command, never repeat it, and
 don't use it. Tell the user it was a key and that it belongs in the plugin's
 masked option (path A), and suggest rotating it, since it is now in this chat.

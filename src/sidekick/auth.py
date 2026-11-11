@@ -87,12 +87,13 @@ _ENV_FIX = (
 
 
 def _not_a_path(value: str) -> bool:
-    """True for secret-shaped text where a file path belongs: an API key or pasted key JSON."""
-    return (
-        value.startswith("AIza")
-        or any(marker in value for marker in ("{", "\n", "private_key", "BEGIN "))
-        or len(value) > 1024
-    )
+    """True unless value is shaped like a file path, so only a path is ever echoed (#119).
+
+    An allow-list, not a key-shape block-list: Google API keys come in more than one prefix
+    (`AIza…`, newer `AQ…`), and any of them pasted here must never reach a log or message."""
+    if len(value) > 1024 or any(marker in value for marker in ("{", "\n", "private_key", "BEGIN ")):
+        return True
+    return not ("/" in value or "\\" in value or value.startswith("~") or value.endswith(".json"))
 
 
 def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:

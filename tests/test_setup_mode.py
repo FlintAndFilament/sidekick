@@ -12,7 +12,7 @@ from sidekick import setup_cli
 from sidekick.auth import AuthError, build_auth
 from sidekick.config import AuthConfig, ConfigError, load_config
 from sidekick.server import build_setup_server
-from tests._fakes import FAKE_GOOGLE_API_KEY
+from tests._fakes import FAKE_AQ_API_KEY, FAKE_GOOGLE_API_KEY
 
 
 def _write(cfg: Path, *args: str) -> dict:  # type: ignore[type-arg]
@@ -63,6 +63,8 @@ def test_picker_sa_file_ignores_a_stale_shell_var(
     "pasted",
     [
         FAKE_GOOGLE_API_KEY,
+        FAKE_AQ_API_KEY,
+        "some-token-with-no-path-shape",
         '{"type": "service_account", "private_key": "-----BEGIN PRIVATE KEY-----\\nabc"}',
     ],
 )
@@ -164,3 +166,10 @@ def test_a_crash_while_serving_is_not_treated_as_a_startup_failure(
     with pytest.raises(OSError):
         entry.main()
     assert served == []  # no second server on an already-initialized stdio
+
+
+@pytest.mark.parametrize("path", ["~/keys/sa.json", "/abs/sa-key", "sa.json", "C:\\keys\\sa"])
+def test_path_shaped_values_are_still_shown(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    monkeypatch.setenv("SIDEKICK_SA_FILE", path)
+    with pytest.raises(AuthError, match="does not exist"):
+        build_auth(AuthConfig(method="env"))

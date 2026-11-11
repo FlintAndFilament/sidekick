@@ -32,12 +32,8 @@ def _store(tmp_path: Path) -> ArtifactStore:
 
 
 def test_save_names_file(tmp_path: Path) -> None:
-    path = _store(tmp_path).save(
-        "architect", "Design a cache", "body", model="m", session="s"
-    )
-    assert (
-        path == tmp_path / "sidekick-artifacts" / "20260917-2205-architect-design-a-cache.md"
-    )
+    path = _store(tmp_path).save("architect", "Design a cache", "body", model="m", session="s")
+    assert path == tmp_path / "sidekick-artifacts" / "20260917-2205-architect-design-a-cache.md"
 
 
 def test_save_writes_header_and_body(tmp_path: Path) -> None:

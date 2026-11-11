@@ -8,31 +8,36 @@ sequenceDiagram
     participant S as sources.py
     participant W as transcript + artifacts
 
-    CC->>T: tool call (prompt, thinking?, session_name?, model?, web?)
+    CC->>T: tool call (prompt, thinking?, session_name?, model?, web?, write_artifact?)
     T->>B: call_gemini(...)
     B->>B: resolve_capabilities(write, web)
     B->>C: get_or_create_session(tool:name, model)
     B->>C: ask(session, prompt, registry, web)
     C->>L: run_tool_loop(generate, history, registry)
     loop until a text answer (max 20 rounds)
-        L->>G: generate_content (GenerateContentConfig)
+        L->>G: generate_content (503/429 retried with backoff)
         G-->>L: candidate
         L->>L: record_grounding(candidate)
         opt function calls
             L->>L: registry.dispatch() via Sandbox
         end
     end
-    L-->>C: answer
-    alt terminal 503/429 and no write_file yet
-        C-->>B: ClientError
-        B->>C: ask(..., fallback model)
-        C-->>B: answer (notice prefixed later)
-    else success
+    alt success
+        L-->>C: answer
         C-->>B: answer
+    else retryable 503/429, not on fallback, no write_file yet
+        C-->>B: ClientError
+        B->>C: ask(..., fallback model = newest Flash-Lite)
+        C-->>B: answer (notice prefixed later)
+    else 503/429 after write_file, non-retryable, or fallback also fails
+        C-->>B: ClientError
+        B->>W: transcript.append() only if tool calls were recorded
+        B-->>T: "[sidekick error] ..."
+        T-->>CC: error string
     end
     B->>S: resolve_redirects(record_uris)
     S-->>B: real URLs
-    B->>B: append sources_footer()
+    B->>B: append sources_footer() (+ typed-URL caution)
     B->>W: transcript.append()
     opt artifact requested
         B->>W: artifacts.save()

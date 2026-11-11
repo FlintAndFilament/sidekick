@@ -2,8 +2,8 @@
 
 **Config file location:** `~/.config/sidekick/config.json`
 
-Created by `/sidekick:setup`. Safe to edit by hand. The server reads it once at startup, so restart
-the MCP server (or Claude Code) after an edit.
+Created by `/sidekick:setup`. Safe to edit by hand. The server reads it once at startup, so
+restart it after an edit: see [Change settings & reconnect](auth.md#change-settings--reconnect).
 
 `/sidekick:setup` writes only `project`, `location`, `default_thinking`, `default_model` (when you
 give one), `transcript_dir` and `auth`. Every other field below is optional and takes its default

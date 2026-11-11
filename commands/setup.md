@@ -52,14 +52,15 @@ instead of a second one:
      Platform".
 4. Follow the chosen path:
 
-   **A. Keychain.** Tell the user, in these words: "Type `/plugin`, open the
-   Installed tab, select sidekick, choose **Configure options**. On the **Gemini API key**
-   row, paste your key directly. Pressing Enter on an empty row does not open
+   **A. Keychain.** Tell the user, in these words: "Run
+   `/plugin configure sidekick@sidekick`. On the **Gemini API key** row, paste
+   your key directly. Pressing Enter on an empty row does not open
    a prompt; it just closes. The key shows masked except its last few
    characters. Press Enter to save. It is stored in your keychain. Get a key
    at https://aistudio.google.com/apikey." Then use
    AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key' --key-source 'plugin'`.
-   To change or replace the key later, the user repeats the same `/plugin` steps.
+   To change or replace the key later, the user repeats the same steps; see
+   docs/auth.md, "Change settings & reconnect".
 
    **B. Env var.** Ask for the NAME of the variable (default
    `values.api_key_env`, normally `GEMINI_API_KEY`). Say plainly that the
@@ -73,10 +74,9 @@ instead of a second one:
      (https://cloud.google.com/sdk/docs/install), then run
      `gcloud auth application-default login` with `! ` in front so it runs
      here.
-   - `env` — "Service-account key file". Tell the user: "Type `/plugin`, open
-     the Installed tab, select sidekick, choose **Configure options**, and on
-     the **Service-account key file** row pick or paste the path to the JSON
-     key, then press Enter to save." Then use AskUserQuestion: "Done" or "I
+   - `env` — "Service-account key file". Tell the user: "Run
+     `/plugin configure sidekick@sidekick`, and on the **Service-account key
+     file** row paste the path to the JSON key, then press Enter to save." Then use AskUserQuestion: "Done" or "I
      export GOOGLE_APPLICATION_CREDENTIALS myself"
      (`checks.google_application_credentials` shows whether it is set here).
      On "Done", add `--sa-file-source 'plugin'` to the write.
@@ -104,8 +104,9 @@ instead of a second one:
 
    On `"ok": false`, show `error` and offer to retry from step 3. Otherwise
    show any `warnings`, and show `backup`'s path if it is non-null.
-7. Tell the user to run `/mcp`, select `plugin:sidekick:mcp` and choose
-   **Reconnect** (or restart Claude Code), then say "done". Then verify: call
+7. Tell the user to run `/reload-plugins` (or `/mcp` → `plugin:sidekick:mcp`
+   → **Reconnect**), then say "done". Steps: docs/auth.md, "Change settings &
+   reconnect". Then verify: call
    the `list_models` tool with `refresh=true`.
    - If only `setup_status` exists, call it, show the problem in one line, and
      go back to the step it points to.

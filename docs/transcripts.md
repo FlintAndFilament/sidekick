@@ -120,7 +120,8 @@ projects — the server reads `CLAUDE_PROJECT_DIR` from Claude Code.
 ## Changing the transcript directory
 
 To override the default and collect all transcripts in one place, edit
-`~/.config/sidekick/config.json` and restart Claude Code:
+`~/.config/sidekick/config.json` and restart the server
+([how](auth.md#change-settings--reconnect)):
 ```json
 {"transcript_dir": "~/sidekick-transcripts"}
 ```

@@ -84,7 +84,7 @@ def setup_needed_text(problem: str) -> str:
         "sidekick is installed but not set up yet, so its Gemini tools are unavailable.\n\n"
         f"Problem:\n{problem}\n\n"
         "Tell the user this in one or two lines and offer to run /sidekick:setup. After they fix "
-        "it, they reconnect with /mcp (plugin:sidekick:mcp → Reconnect) or restart Claude Code."
+        "it, they run /reload-plugins (or /mcp → plugin:sidekick:mcp → Reconnect)."
     )
 
 

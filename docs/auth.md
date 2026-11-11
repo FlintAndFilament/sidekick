@@ -34,9 +34,40 @@ written to the log (see [logging.md](logging.md)); the messages are listed in
 | **B. API key from an env var** | Export the key yourself (CI, scripts, Linux, Windows) | yes |
 | **C. Google Cloud Agent Platform** | gcloud login (ADC), a service-account file (picked in the plugin options), or a service account in macOS Keychain, plus a GCP project | none |
 
-To change or reset anything later, run `/sidekick:setup` again. To replace the key, use `/plugin`
-→ **Installed** → sidekick → **Configure options**. Then reconnect with `/mcp` → `plugin:sidekick:mcp`
-→ **Reconnect**, or restart Claude Code.
+To change or reset anything later, see [Change settings & reconnect](#change-settings--reconnect).
+
+---
+
+## Change settings & reconnect
+
+This is the one place these steps are described; the rest of the docs link here. The server reads
+its settings once, at startup, so every change ends with a restart.
+
+1. **A plugin option** (the **Gemini API key** or the **Service-account key file**): run
+   `/plugin configure sidekick@sidekick`. On the row you want, paste the value directly, then
+   press Enter to save. No separate prompt opens, and Enter on an empty row just closes the
+   dialog. The key shows masked except its last few characters. (`/plugin` → **Installed** →
+   sidekick → **Configure options** opens the same dialog.)
+2. **`config.json`** (auth method, project, defaults): run `/sidekick:setup` again, or edit
+   `~/.config/sidekick/config.json` by hand (see [configuration.md](configuration.md)).
+3. **Restart the server:** run `/reload-plugins`. It restarts sidekick with the new values. The
+   alternative is `/mcp` → `plugin:sidekick:mcp` → **Reconnect**, or restarting Claude Code. A
+   restart starts a new transcript file and drops the in-memory sessions (see
+   [transcripts.md](transcripts.md#session-boundaries)).
+
+From a terminal, `claude plugin configure sidekick@sidekick` shows which options are set. It
+never prints a value. For scripts and CI, `claude plugin configure sidekick@sidekick
+--values-stdin` reads the options as a JSON object of single-line strings on stdin, so the key
+stays off the command line; options you leave out keep their values.
+
+**Updating sidekick.** `/plugin update sidekick` inside a session does **not** update the
+plugin. From a terminal, run:
+
+```bash
+claude plugin marketplace update sidekick && claude plugin update sidekick@sidekick
+```
+
+then run `/reload-plugins` in Claude Code.
 
 ---
 
@@ -236,11 +267,11 @@ once to the newest Flash-Lite (see [configuration.md](configuration.md#choosing-
 | `no ADC credentials found` | ADC not configured | `gcloud auth application-default login` |
 | Token refresh / `invalid_grant` errors on a call | ADC refresh token expired or revoked | `gcloud auth application-default login` |
 | `403 PERMISSION_DENIED: quota project not set` | ADC user credentials have no quota project | `gcloud auth application-default set-quota-project YOUR_PROJECT_ID` |
-| `auth method is 'env' but no service-account key file is set` / `points at a file that does not exist` / `could not be loaded` | `env` method: no file picked and `GOOGLE_APPLICATION_CREDENTIALS` unset, a missing file, or a file google-auth cannot read. ADC is never used as a fallback | Pick the file in `/plugin` → Installed → sidekick → Configure options → **Service-account key file**, then `/mcp` → Reconnect; check the file's contents |
+| `auth method is 'env' but no service-account key file is set` / `points at a file that does not exist` / `could not be loaded` | `env` method: no file picked and `GOOGLE_APPLICATION_CREDENTIALS` unset, a missing file, or a file google-auth cannot read. ADC is never used as a fallback | Pick the file on the **Service-account key file** row, then restart ([how](#change-settings--reconnect)); check the file's contents |
 | `Keychain item not found` | Secret not stored | Re-run the `security add-generic-password` command |
 | `not valid service account JSON` | Keychain value corrupted | Re-store the SA JSON key |
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |
-| `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Set the key in `/plugin` → Installed → sidekick → Configure options, then `/mcp` → Reconnect |
+| `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Paste the key on the **Gemini API key** row, then restart ([how](#change-settings--reconnect)) |
 | `'api_key_env' in config.json contains what looks like an API key` | The key itself was put in `api_key_env` | Set `api_key_env` to the variable name, e.g. `"GEMINI_API_KEY"` |
 | `'project' is required for Vertex AI auth methods` | `project` missing with `adc`/`env`/`keychain` | Add `project` to config.json, or switch to `api_key` |
 | `Web access was requested but is unavailable` | `web=true` on a Vertex method | Use `api_key` for web access |

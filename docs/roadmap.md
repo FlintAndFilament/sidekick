@@ -1,14 +1,14 @@
 # Roadmap
 
 What has shipped, what is open, and what is parked. Rebuilt from git history and GitHub issues on
-2026-09-21; everything under **Shipped** is on `main`.
+2026-11-11; everything under **Shipped** is on `main`.
 
 The `26.7.x` labels are the names the July releases went out under. Work after 26.7.4 is grouped
 by feature and issue number. From the plugin on, releases carry the plugin version
 (`.claude-plugin/plugin.json`): 0.1.0 plugin, 0.2.0 and 0.3.0 rename, 0.4.0 `list_sessions`
-(tagged `v0.4.0`), 0.5.0 auth set up inside Claude Code.
+(tagged `v0.4.0`), 0.5.0 auth set up inside Claude Code (tagged `v0.5.0`).
 
-The project was called gemini-bridge until 2026-09-24 (#104). Upgrading an older install: **before** `/plugin update sidekick`, run `mv ~/.config/gemini-bridge ~/.config/sidekick`, then update and restart. (After the update, the new server has already created `~/.config/sidekick/`, and `mv` nests the old folder inside it.)
+The project was called gemini-bridge until 2026-09-24 (#104). Upgrading an older install: **first** run `mv ~/.config/gemini-bridge ~/.config/sidekick`, then update from a terminal with `claude plugin marketplace update sidekick && claude plugin update sidekick@sidekick`, then run `/reload-plugins` in Claude Code. (Move the folder before updating: after the update, the new server has already created `~/.config/sidekick/`, and `mv` nests the old folder inside it. `/plugin update` inside a session does not update the plugin.)
 
 ---
 
@@ -37,8 +37,8 @@ credential management beyond one-time setup.
 ### 26.7.2 — Google AI Studio API key auth
 
 - `api_key` auth method (#30): no GCP project or `gcloud` needed. `AuthResult` + `build_auth()`
-  dispatch in `auth.py`; `project` became optional, required only for the Vertex methods. The
-  config stores the env var **name**, never the key.
+  dispatch in `auth.py`; `project` became optional, required only for the Google Cloud Agent
+  Platform (formerly Vertex AI) methods. The config stores the env var **name**, never the key.
 - CI warnings and failures fixed (#32); transcript files renamed to `sidekick-transcript`
   (#35).
 - 26.7.2.1 hotfix (#39): clearer `setup.sh` API key prompt (asks for the variable name and rejects
@@ -68,7 +68,7 @@ credential management beyond one-time setup.
   `list_models` returns the live, chat-only catalog, falling back to a curated shortlist
   when the live list can't be read (#56). Single source of truth in `models.py`.
 - `list_models` lists only models the bridge can run and accepts Gemini 3 previews (#60);
-  it works on Vertex AI, which reports no `supported_actions` (#64).
+  it works on Agent Platform, which reports no `supported_actions` (#64).
 - Tool parameter descriptions reach Claude (they were silently dropped before) (#55).
 - `default_model` config field (#59).
 - Moved off Gemini 2.5 ahead of its 2026-10-16 retirement: fallback and shortlists now use 3.x
@@ -94,7 +94,7 @@ when launched from the home directory or filesystem root. See
 
 At startup the bridge reads the live catalog and resolves the newest Flash, Flash-Lite and Pro.
 Calls without `model=` get the newest Flash; aliases `flash` / `flash-lite` / `pro` (and Google's
-`-latest` names, translated so they also work on Vertex) track the newest release; the fallback is
+`-latest` names, translated so they also work on Agent Platform) track the newest release; the fallback is
 the newest Flash-Lite. Pinned ids are used when the catalog can't be read. The thinking level is
 mapped per concrete model, and the bridge learns and remembers which levels a model rejects. See
 [configuration.md](configuration.md#choosing-a-model).
@@ -115,7 +115,7 @@ drift from the wiring.
 
 `web=true` (or `web_tools.enabled`) attaches Gemini's server-side `google_search` and
 `url_context`. Off by default because grounding is billed per request. Web access and `write_file`
-never share a call. Developer API (`api_key`) only: on Vertex, web is dropped and the reply carries
+never share a call. Developer API (`api_key`) only: on Agent Platform, web is dropped and the reply carries
 a notice. See [tools.md](tools.md#web-access).
 
 #70 (let Gemini call external MCP tools such as Exa or Firecrawl) was closed as not planned,
@@ -134,6 +134,26 @@ superseded by #76.
 Web answers end with a sources list taken from the grounding metadata (#80). The bridge resolves
 Google's grounding redirect links to the real URLs, and Gemini is told not to type URLs itself, so
 every listed URL comes from the metadata (#82). Resolving costs no Gemini tokens.
+
+### Hardening (#85–#99), web source names (#90, #92)
+
+A batch of review fixes from 2026-09-22 and -23, before the plugin.
+
+- `setup.sh` re-runs merge into `config.json` instead of rewriting it, so hand-added
+  `artifacts_dir`, `file_tools` and `web_tools` survive (#85). The write is atomic (#95), each
+  backup gets its own timestamped name instead of overwriting the last one (#96), and tests cover
+  injection round-trips and api_key project/location handling (#97). `config.json` is read once,
+  not twice (#99). Its closing text names the `default_model` field (#89).
+- Auth method `env` no longer falls back to the user's ADC when
+  `GOOGLE_APPLICATION_CREDENTIALS` is unset; it fails with a clear error (#86).
+- An unusable `transcript_dir` gives an actionable startup error instead of a traceback (#87),
+  including `~nosuchuser` paths that failed during path resolution (#94).
+- Library logs (google, google_genai, httpx, httpcore, urllib3) reach the log file; the old level suppression had no
+  effect (#88). Credential payloads are dropped from the log deliberately (#98).
+- A web source with no title is named after its resolved URL's host, not the redirect link, and
+  untitled sources are still counted in the transcript summary (#90). When Gemini types a URL
+  into a web answer, the sources footer opens with a caution that only the recorded list is
+  authoritative; the answer itself is left as is (#92).
 
 ### Sidekick plugin (#102)
 
@@ -173,18 +193,29 @@ project-local by default, and nothing has needed to switch directories mid-sessi
 ### Auth set up inside Claude Code (#116) — 0.5.0
 
 No shell-profile export or launch alias is needed. The Gemini API key is a masked plugin option
-that Claude Code keeps in the system keychain, and the Agent Platform (formerly Vertex AI)
+that Claude Code keeps in the system keychain, and the Agent Platform
 service-account file is a picker option; both are set from `/plugin` → Configure options. A
 missing or broken credential no longer ends in "Connection closed": the server starts in
 setup mode with one `setup_status` tool that explains the fix. `/sidekick:setup` walks three
 paths (keychain key, env-var key, Agent Platform) and verifies them with a live model list.
-Also: certifi bumped for Dependabot alert #1 (#117).
+Also in `v0.5.0`:
+
+- certifi bumped for Dependabot alert #1 (#117).
+- The test suite builds its fake API keys at runtime instead of committing key-shaped
+  literals, which had tripped secret-scanning alert #1 (#113).
+- The service-account file guard echoes a value only when it is shaped like a file path. The
+  old check looked for `AIza…` keys and missed newer `AQ…` keys pasted into the option (#119).
 
 ---
 
 ## Open
 
-Nothing. New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
+- #121 — full documentation review: README, `docs/` and diagrams.
+- #122 — after a 503/429 fallback, the answer lands in the fallback model's session, so the next
+  call without `model=` loses that exchange.
+- #123 — `/sidekick:setup` cannot store a service account in the macOS Keychain.
+
+New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 
 ---
 
@@ -201,5 +232,5 @@ reset.
 
 ### Location-aware model validation
 
-The server does not check at startup that the chosen model is served in the configured Vertex
-`location`; a mismatch shows up as a 404 at call time. `"global"` avoids this. No issue filed yet.
+The server does not check at startup that the chosen model is served in the configured
+Agent Platform `location`; a mismatch shows up as a 404 at call time. `"global"` avoids this. No issue filed yet.

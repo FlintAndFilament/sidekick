@@ -80,8 +80,8 @@ def _load_adc(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
 
 _ENV_CREDENTIALS_VAR = "GOOGLE_APPLICATION_CREDENTIALS"
 _ENV_FIX = (
-    "Fix: in Claude Code type /plugin, open Installed → sidekick → Configure options and pick "
-    "the file in **Service-account key file**, then /mcp → Reconnect. "
+    "Fix: in Claude Code run /plugin configure sidekick@sidekick, pick the file on the "
+    "**Service-account key file** row and press Enter, then run /reload-plugins. "
     f"(Or set {_ENV_CREDENTIALS_VAR} in the environment Claude Code starts from.)"
 )
 
@@ -146,6 +146,21 @@ def _load_env(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
     return cast(google.auth.credentials.Credentials, loaded)
 
 
+def _keychain_store_fix(service: str, account: str) -> str:
+    """How to (re-)store the SA JSON by hand; /sidekick:setup can't store it yet (#123).
+
+    `-w` with no value would prompt instead of putting the JSON on argv, but the prompt reads a
+    single line (and a terminal line caps at 1024 bytes), so a multi-line SA key can't go through
+    it. `$(cat …)` is on argv only while `security` runs; the hex decode below reads it back."""
+    return (
+        "Fix: store the service account key from a terminal (never paste it into the chat):\n"
+        f"  security add-generic-password -U -s '{service}' -a '{account}' "
+        '-w "$(cat /path/to/sa-key.json)"\n'
+        "then delete the JSON file and run /reload-plugins in Claude Code. "
+        "See docs/auth.md, Method 3: Apple Keychain."
+    )
+
+
 def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
     """Load service account JSON from Apple Keychain (macOS only)."""
     # model_validator guarantees non-None when method="keychain"; or-defaults are a safety net
@@ -162,8 +177,7 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
         _log.error("keychain item not found (service=%r, account=%r)", service, account)
         raise AuthError(
             f"Gemini auth error: Keychain item not found "
-            f"(service={service!r}, account={account!r}).\n"
-            "Fix: run /sidekick:setup in Claude Code to store the service account key."
+            f"(service={service!r}, account={account!r}).\n" + _keychain_store_fix(service, account)
         ) from exc
     except FileNotFoundError as exc:
         _log.error("security CLI not found — Keychain auth requires macOS")
@@ -181,7 +195,7 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
             _log.error("keychain value hex decode failed: %s", exc)
             raise AuthError(
                 "Gemini auth error: Keychain value could not be decoded.\n"
-                "Fix: run /sidekick:setup in Claude Code to re-store the service account key."
+                + _keychain_store_fix(service, account)
             ) from exc
     try:
         sa_info = json.loads(raw)
@@ -189,7 +203,7 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
         _log.error("keychain value is not valid JSON: %s", exc)
         raise AuthError(
             "Gemini auth error: Keychain value is not valid service account JSON.\n"
-            "Fix: run /sidekick:setup in Claude Code to re-store the service account key."
+            + _keychain_store_fix(service, account)
         ) from exc
 
     _log.debug("keychain credentials loaded (service=%r, account=%r)", service, account)
@@ -201,7 +215,7 @@ def _load_keychain(auth_config: AuthConfig) -> google.auth.credentials.Credentia
         _log.error("keychain value is not a service account (%s)", type(exc).__name__)
         raise AuthError(
             "Gemini auth error: Keychain value is not valid service account JSON.\n"
-            "Fix: run /sidekick:setup in Claude Code to re-store the service account key."
+            + _keychain_store_fix(service, account)
         ) from exc
 
 
@@ -211,8 +225,9 @@ def _looks_like_api_key(value: str) -> bool:
 
 
 _CONFIGURE_HINT = (
-    "Fix: in Claude Code run /sidekick:setup, or type /plugin, open Installed → sidekick → "
-    "Configure options and paste your key (stored in your system keychain).\n"
+    "Fix: in Claude Code run /sidekick:setup, or run /plugin configure sidekick@sidekick, paste "
+    "your key on the Gemini API key row (stored in your system keychain) and press Enter, then "
+    "run /reload-plugins.\n"
     "Get a key at: https://aistudio.google.com/apikey"
 )
 
@@ -255,7 +270,7 @@ _LOADERS: dict[str, _CredLoader] = {
 
 
 def build_credentials(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
-    """Build Vertex AI credentials from the given auth config. Raises AuthError on failure."""
+    """Build Agent Platform (Vertex AI) credentials from the given auth config. Raises AuthError on failure."""
     loader = _LOADERS.get(auth_config.method)
     if loader is None:
         raise ConfigError(f"Unknown auth method: {auth_config.method!r}")

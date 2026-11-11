@@ -8,6 +8,7 @@ on:
     paths:
       - 'requirements*.txt'
       - 'pyproject.toml'
+      - 'uv.lock'
       - 'setup.cfg'
       - 'setup.py'
 

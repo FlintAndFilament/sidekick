@@ -41,7 +41,8 @@ def test_missing_key_error_points_inside_claude_code(monkeypatch: pytest.MonkeyP
     with pytest.raises(AuthError) as err:
         build_auth(AuthConfig(method="api_key"))
     message = str(err.value)
-    assert "/plugin" in message and "Configure options" in message
+    assert "/plugin configure sidekick@sidekick" in message
+    assert "/reload-plugins" in message
     assert "/sidekick:setup" in message
     assert "export" not in message  # the fix is never a shell-profile edit
 
@@ -100,6 +101,7 @@ def test_setup_server_stays_up_and_explains() -> None:
     server = build_setup_server("no key")
     assert "no key" in (server.instructions or "")
     assert "/sidekick:setup" in setup_needed_text("x")
+    assert "/reload-plugins" in setup_needed_text("x")
     tools = {t.name for t in server._tool_manager.list_tools()}
     assert tools == {"setup_status"}
 
@@ -145,7 +147,8 @@ def test_missing_sa_file_points_at_the_picker(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(AuthError) as err:
         build_auth(AuthConfig(method="env"))
     assert "Service-account key file" in str(err.value)
-    assert "Configure options" in str(err.value)
+    assert "/plugin configure sidekick@sidekick" in str(err.value)
+    assert "/reload-plugins" in str(err.value)
 
 
 def test_picked_file_that_vanished_names_the_plugin_option(

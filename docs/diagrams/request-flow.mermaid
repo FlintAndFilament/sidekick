@@ -1,25 +1,29 @@
 sequenceDiagram
     participant CC as Claude Code
     participant S as sidekick (MCP server)
-    participant G as Gemini API<br/>(Developer API or Vertex AI)
+    participant G as Gemini API<br/>(Developer API or Google Cloud Agent Platform,<br/>formerly Vertex AI)
     participant R as Google redirect
 
-    CC->>S: review(content, model?, thinking?, web?, session_name?)
+    CC->>S: review(content, model?, thinking?, web?, session_name?, write_artifact?)
     Note over S: resolve model (alias → newest release)<br/>pick tools: repo reads, + write_file unless web=true,<br/>+ google_search / url_context if web=true
     loop until Gemini answers (tool budget capped)
         S->>G: session history + prompt + tool declarations
         G-->>S: function call (read_file, grep, write_file…)
         S->>S: run it inside the sandbox, record it
     end
-    G-->>S: answer + grounding metadata
-    opt model overloaded (503/429)
+    alt answer
+        G-->>S: answer + grounding metadata
+    else 503/429 after retries, no files written yet
         S->>G: retry once on the newest Flash-Lite
+        G-->>S: answer
         Note over S: prepend "[sidekick notice]"
+    else files already written, or any other error
+        S-->>CC: "[sidekick error] ..."
     end
     opt web sources recorded
         S->>R: HEAD each redirect (not followed)
         R-->>S: 302 Location → real page URL
         Note over S: append sources footer
     end
-    S->>S: append to transcript, save artifact
+    S->>S: append to transcript<br/>save artifact (review/architect by default)
     S-->>CC: answer (+ sources, + artifact path)

@@ -54,3 +54,6 @@ CLAUDE.md
 
 # Gemini artifacts (local only)
 sidekick-artifacts/
+
+# Claude Code agent worktrees
+.claude/worktrees/

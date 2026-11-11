@@ -226,9 +226,7 @@ class TestAdvertisedWebRow:
         tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
         return tools[tool].description or ""
 
-    @pytest.mark.parametrize(
-        "tool", ["ask", "debug", "review", "architect"]
-    )
+    @pytest.mark.parametrize("tool", ["ask", "debug", "review", "architect"])
     def test_every_tool_advertises_the_web_row(self, tmp_path: Path, tool: str) -> None:
         assert "Web access:" in self._described(tmp_path, tool, enabled=False)
 

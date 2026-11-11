@@ -91,12 +91,14 @@ that could not be resolved keeps its redirect link, marked `(unresolved Google r
 
 ## Session boundaries
 
-A new transcript file is created each time the MCP server starts — i.e., each time Claude
-Code starts or restarts. Consecutive Claude Code sessions produce separate files.
+A new transcript file is created each time the MCP server starts: each time Claude Code
+starts, and each time the server is restarted with `/reload-plugins` or `/mcp` → Reconnect.
+Consecutive Claude Code sessions produce separate files.
 
 This means:
 - Calling `brainstorm` then `review` in one Claude Code session → same file
-- Restarting Claude Code → new file, new timestamp, fresh sessions
+- Restarting Claude Code, `/reload-plugins` or `/mcp` → Reconnect → new file, new timestamp,
+  every in-memory session dropped
 - Two servers started in the same minute with the same `transcript_dir` (e.g. two Claude Code
   windows in one project) share a file name, so both append to one file
 
@@ -111,7 +113,9 @@ when Claude Code sets it, otherwise the server's working directory (#102). `~` i
 Configured in `transcript_dir` in `~/.config/sidekick/config.json`.
 
 The directory, including any missing parents, is created at startup if it doesn't exist. The
-startup log names the full transcript path — see [logging.md](logging.md).
+startup log names the full transcript path — see [logging.md](logging.md). If it can't be
+created or used, the server starts in setup mode, offering only `setup_status`, which names the
+directory and the fix.
 
 **Per-project routing is automatic.** Open Claude Code on `~/dev/my-project` and transcripts
 land in `~/dev/my-project/session-summaries/`. No config change needed when switching
@@ -120,7 +124,8 @@ projects — the server reads `CLAUDE_PROJECT_DIR` from Claude Code.
 ## Changing the transcript directory
 
 To override the default and collect all transcripts in one place, edit
-`~/.config/sidekick/config.json` and restart Claude Code:
+`~/.config/sidekick/config.json` and restart the server
+([how](auth.md#change-settings--reconnect)):
 ```json
 {"transcript_dir": "~/sidekick-transcripts"}
 ```

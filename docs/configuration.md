@@ -2,21 +2,25 @@
 
 **Config file location:** `~/.config/sidekick/config.json`
 
-Created by `/sidekick:setup`. Safe to edit by hand. The server reads it once at startup, so restart
-the MCP server (or Claude Code) after an edit.
+Created by `/sidekick:setup`. Safe to edit by hand. The server reads it once at startup, so
+restart it after an edit: see [Change settings & reconnect](auth.md#change-settings--reconnect).
 
 `/sidekick:setup` writes only `project`, `location`, `default_thinking`, `default_model` (when you
 give one), `transcript_dir` and `auth`. Every other field below is optional and takes its default
 until you add it by hand. **Re-running `/sidekick:setup` updates only those fields and leaves the
-rest of the file alone** (#85), so an `artifacts_dir`, `file_tools` or `web_tools` you added by hand survives.
+rest of the file alone**, so an `artifacts_dir`, `file_tools` or `web_tools` you added by hand survives.
 A saved `default_model` is kept when you accept the prompt's default; enter `-` to clear it. If
 the file is not valid JSON, the wizard moves it aside to `config.json.<timestamp>.bak` — one copy
-per broken run, never overwritten (#96) — and starts fresh rather than merging into it. The merged
+per broken run, never overwritten — and starts fresh rather than merging into it. The merged
 file is written through a temp file and renamed into place, so an interrupted write cannot leave a
-half-written config (#95). A missing file, invalid JSON, or a value that fails validation stops the server
-at startup with `Config file not found`, `Config file is not valid JSON`, or
-`Config validation failed: …` in the log (see [logging.md](logging.md)). Unknown keys are ignored
-silently, so check spelling if a setting seems to have no effect.
+half-written config.
+
+**When the config is wrong, the server starts in setup mode**: it connects but offers only
+`setup_status`, which names the problem, and the log says the same (see [logging.md](logging.md)).
+The messages are `Config file not found`, `Config file is not valid JSON`, `Config file could not
+be read` and `Config validation failed: …`. A missing file is fine when the plugin's **Gemini API
+key** option is set: the server then runs on that key with every default. Unknown keys are
+ignored silently, so check spelling if a setting seems to have no effect.
 
 ## Full example
 
@@ -54,9 +58,10 @@ silently, so check spelling if a setting seems to have no effect.
 **Required when:** `auth.method` is `adc`, `env`, or `keychain`
 **Omit when:** `auth.method = "api_key"` (Developer API does not use a GCP project)
 
-Config validation fails at startup if `project` is missing or empty with a Vertex auth method.
-Your GCP project ID. Must have the Vertex AI API enabled and `roles/aiplatform.user`
-granted to your ADC credentials or service account.
+Your GCP project ID, for Google Cloud Agent Platform (formerly Vertex AI). It must have the
+Agent Platform API (`aiplatform.googleapis.com`) enabled and `roles/aiplatform.user` granted to
+your ADC credentials or service account. If `project` is missing or empty with an Agent Platform
+method, the server starts in setup mode.
 
 ---
 
@@ -66,8 +71,8 @@ granted to your ADC credentials or service account.
 **Default:** `"global"`
 **Example:** `"us-central1"`
 
-Vertex AI location. `"global"` works for all models and is the recommended default. Only used
-by the Vertex AI backends (`adc`/`env`/`keychain`); ignored in `api_key` mode.
+Agent Platform location. `"global"` works for all models and is the recommended default. Only
+used by the Agent Platform methods (`adc`/`env`/`keychain`); ignored in `api_key` mode.
 
 `"global"` routes to the lowest-latency region automatically and is the safest choice —
 newer models (e.g. `gemini-3.5-flash`) are frequently **global-only**. Set a specific region
@@ -114,8 +119,8 @@ it judges a different level is appropriate.
 **Default:** `"./session-summaries"`
 
 Directory where transcript files are written. Created if it doesn't exist; if it can't be
-created (read-only parent, permission denied) the server stops at startup with
-`Transcript directory cannot be created: …` instead of a traceback (#87). Transcript files
+used (read-only parent, permission denied) the server starts in setup mode, offering only
+`setup_status`, with `transcript_dir: Transcript directory cannot be used: …` (#87). Transcript files
 are named `YYYYMMDD-HHMM-sidekick-transcript.md` using the server startup time.
 
 The project root is `CLAUDE_PROJECT_DIR` when Claude Code sets it, otherwise the server's
@@ -163,11 +168,11 @@ mutually exclusive (see [tools.md](tools.md#web-access)), so with `enabled: true
 passes `web=false`. Turning this on is therefore a change to your write workflow, not only to
 what Gemini can read.
 
-**Developer API only.** Web access works only with `auth.method = "api_key"`. On Vertex AI
+**Developer API only.** Web access works only with `auth.method = "api_key"`. On Agent Platform
 (`adc`, `env`, `keychain`) the setting and any `web=true` are accepted but dropped: the call runs
 without web access, keeps its normal file tools (including `write_file` where the tool has it),
 and the reply starts with a `[sidekick notice]` saying the answer is not web-grounded. Tool
-descriptions on Vertex say web access is unavailable.
+descriptions on Agent Platform say web access is unavailable.
 
 ---
 
@@ -213,7 +218,9 @@ Largest content a single `write_file` call may write. The tool descriptions quot
 ### `auth.method`
 
 **Type:** string
-**Default:** `"adc"`, or `"api_key"` when the plugin's **Gemini API key** option is filled in
+**Default:** `"api_key"` when the plugin's **Gemini API key** option is filled in and
+`config.json` names no `auth.method` (or doesn't exist); otherwise `"adc"`. A saved method
+always wins: with `adc` saved, a filled-in key option is ignored.
 **Valid values:** `adc`, `env`, `keychain`, `api_key`
 
 See [auth.md](auth.md) for full setup instructions for each method.
@@ -312,8 +319,8 @@ adjustment for that model for the rest of the process, and logs a warning:
 Adjustments only ever go **up** in cost, so `thinking="none"` means "the cheapest level this
 model accepts". An unrecognized model name raises a `ClientError` at call time.
 
-> **Gemini 2.5 retires 2026-10-16.** `gemini-2.5-pro` already returns 404 on the Developer API for
-> new users. The resolver never selects 2.5 while a 3.x model exists.
+> **Gemini 2.5 was scheduled to retire on 2026-10-16.** A 2.5 id may now return 404. The
+> resolver never selects 2.5 while a 3.x model exists.
 
 ### How a model value is resolved
 

@@ -1,0 +1,31 @@
+flowchart TD
+    RUN(["/sidekick:setup"]) --> UV{"uv installed?"}
+    UV -->|no| UVI["offer Astral's installer<br/>(or print the command and stop)"]
+    UVI --> UV
+    UV -->|yes| ST["sidekick-setup status<br/>(+ setup_status if in setup mode)"]
+    ST --> PATH{"which path?"}
+
+    PATH -->|"A. API key in the keychain<br/>(recommended)"| A1["you: /plugin configure sidekick@sidekick<br/>paste the key on the Gemini API key row, Enter"]
+    A1 --> A2["write --auth-method api_key<br/>--key-source plugin"]
+
+    PATH -->|"B. API key from an env var"| B1["ask the variable NAME<br/>(never the key)"]
+    B1 --> B2["write --auth-method api_key<br/>--api-key-env NAME"]
+
+    PATH -->|"C. Google Cloud Agent Platform"| C0{"sign-in method"}
+    C0 -->|adc| C1["gcloud auth application-default login<br/>(+ set-quota-project)"]
+    C0 -->|env| C2["you: pick the JSON key in<br/>Service-account key file"]
+    C0 -->|"keychain (macOS)"| C3["store the SA JSON in Keychain<br/>(safe command in auth.md)"]
+    C1 --> C4["project + location"]
+    C2 --> C4
+    C3 --> C4
+    C4 --> C5["write --auth-method adc / env / keychain<br/>(env + picker: --sa-file-source plugin)"]
+
+    A2 --> DEF["default thinking + model"]
+    B2 --> DEF
+    C5 --> DEF
+    DEF --> RL["you: /reload-plugins<br/>(or /mcp → Reconnect)"]
+    RL --> V{"list_models(refresh=true)"}
+    V -->|"live model list"| OK(["done"])
+    V -->|"only setup_status"| FIX["show the problem, back to its step"]
+    V -->|"'Live model list unavailable'"| FIX
+    FIX --> PATH

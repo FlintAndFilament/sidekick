@@ -115,6 +115,8 @@ Plugin options arrive as env (`SIDEKICK_API_KEY`, `SIDEKICK_SA_FILE`, set in `pl
 
 **Diagram:** [diagrams/generating-call.mermaid](diagrams/generating-call.mermaid) — one generating call through the modules, step by step.
 
+**Diagram:** [diagrams/tool-loop.mermaid](diagrams/tool-loop.mermaid) — steps 6–9 in detail: the function-calling loop, its caps, and how it ends.
+
 ## Session Lifecycle
 
 - **Created:** on the first call for a key, with no API call. The key is

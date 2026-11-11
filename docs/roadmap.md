@@ -206,19 +206,22 @@ Also in `v0.5.0`:
 - The service-account file guard echoes a value only when it is shaped like a file path. The
   old check looked for `AIza…` keys and missed newer `AQ…` keys pasted into the option (#119).
 
-### Fixes (#122)
+### Fixes (#122, #124)
 
 - A 503/429 fallback answer is now part of the named conversation. The retry on Flash-Lite sees
   the session's earlier turns, and its answer is committed to the requested model's session, so
   the next call without `model=` continues from it. `list_sessions` no longer shows a separate
   fallback-model row (#122).
+- The `env` method loads a service-account key only. It no longer calls google-auth's deprecated
+  `load_credentials_from_file`, which accepts any credential type, including an external-account
+  config that fetches tokens from URLs the file names. Any other type is refused with an error
+  that names the type it found (#124).
 
 ---
 
 ## Open
 
 - #123 — `/sidekick:setup` cannot store a service account in the macOS Keychain.
-- #124 — the `env` service-account path uses google-auth's deprecated `load_credentials_from_file`.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 

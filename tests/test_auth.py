@@ -12,6 +12,8 @@ from sidekick.auth import AuthError, build_auth, build_credentials
 from sidekick.config import AuthConfig, ConfigError
 from tests._fakes import FAKE_GOOGLE_API_KEY
 
+_SA_FROM_INFO = "google.oauth2.service_account.Credentials.from_service_account_info"
+
 
 def _adc_config() -> AuthConfig:
     return AuthConfig(method="adc")
@@ -69,29 +71,48 @@ class TestEnv:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         key_file = tmp_path / "sa-key.json"
-        key_file.write_text("{}")
+        key_file.write_text(json.dumps({"type": "service_account", "client_email": "a@b"}))
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
         mock_creds = MagicMock()
-        with patch(
-            "google.auth.load_credentials_from_file", return_value=(mock_creds, "project")
-        ) as loader:
+        with (
+            patch(_SA_FROM_INFO, return_value=mock_creds) as loader,
+            patch("google.auth.load_credentials_from_file", side_effect=AssertionError),
+        ):
             with self.NO_ADC:
                 result = build_credentials(_env_config())
         assert result is mock_creds
-        assert loader.call_args.args[0] == str(key_file)
+        assert loader.call_args.args[0]["client_email"] == "a@b"
+
+    @pytest.mark.parametrize("cred_type", ["external_account", "authorized_user", None])
+    def test_non_service_account_file_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cred_type: object
+    ) -> None:
+        # #124: the env method accepts a service-account key only. An external-account or
+        # user credential config must never reach a google-auth loader.
+        key_file = tmp_path / "creds.json"
+        key_file.write_text(json.dumps({"type": cred_type, "audience": "x"}))
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
+        with patch(_SA_FROM_INFO, side_effect=AssertionError) as loader:
+            with self.NO_ADC, pytest.raises(AuthError, match="not a service-account key"):
+                build_credentials(_env_config())
+        loader.assert_not_called()
+
+    def test_non_json_file_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        key_file = tmp_path / "sa-key.json"
+        key_file.write_text("not json")
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
+        with self.NO_ADC, pytest.raises(AuthError, match="could not be loaded"):
+            build_credentials(_env_config())
 
     def test_unreadable_key_file_raises_auth_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import google.auth.exceptions
-
         key_file = tmp_path / "sa-key.json"
-        key_file.write_text("not json")
+        key_file.write_text(json.dumps({"type": "service_account"}))
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
-        with patch(
-            "google.auth.load_credentials_from_file",
-            side_effect=google.auth.exceptions.DefaultCredentialsError("bad file"),
-        ):
+        with patch(_SA_FROM_INFO, side_effect=ValueError("missing private_key")):
             with pytest.raises(AuthError, match="GOOGLE_APPLICATION_CREDENTIALS"):
                 build_credentials(_env_config())
 

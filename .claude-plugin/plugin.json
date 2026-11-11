@@ -1,6 +1,6 @@
 {
   "name": "sidekick",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A second opinion from Google Gemini inside Claude Code: review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
   "author": {
     "name": "FlintAndFilament"

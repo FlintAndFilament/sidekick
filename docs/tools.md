@@ -41,7 +41,9 @@ Every generating call appends an entry to the session transcript — see
 
 ## Repository access
 
-Gemini can inspect — and for some tools, write to — the repository Claude Code was launched in.
+Gemini can inspect — and for some tools, write to — the project root: `CLAUDE_PROJECT_DIR`
+when Claude Code sets it to a real directory, otherwise the server's working directory (#102).
+This is the same root transcripts use (see [transcripts.md](transcripts.md#transcript-directory)).
 Gemini never touches disk itself: it *requests* a tool call, and the bridge runs it locally
 inside a sandbox, then sends the result back. One MCP call allows up to 20 rounds of such
 requests; after that Gemini is told to answer with what it has.
@@ -75,8 +77,9 @@ A result that hits a cap is flagged `truncated=true`; a `grep` that runs out of 
   `.aws/**`, `.gnupg/**`, `.netrc`, `.npmrc`, `.pypirc`) is checked case-insensitively, **at any
   depth** (so a nested `vendor/x/.git/` is covered), on both the requested and the resolved path.
   Setting `file_tools.deny` in config replaces this list rather than extending it.
-- File tools switch themselves off when Claude Code is launched from your home directory, the
-  filesystem root, or any folder containing your home directory, or when
+- File tools switch themselves off when the project root (`CLAUDE_PROJECT_DIR`, else the
+  working directory) is your home directory, the filesystem root, or any folder containing
+  your home directory, or when
   `file_tools.enabled` is `false`. The startup log line says which.
 - `glob` and `grep` skip `.venv`, `venv`, `node_modules`, `__pycache__`, `dist`, `build`,
   `.mypy_cache`, `.pytest_cache` and `.ruff_cache`, and never follow symlinked directories.
@@ -249,11 +252,11 @@ Claude session to do exactly that.
 
 - Retrieved content is untrusted. Gemini's system instruction says so explicitly, and the tool
   descriptions tell the caller, but treat a web-grounded conclusion as a claim to check.
-- **Web access does not work on Vertex.** Not merely untested: the google-genai SDK raises
+- **Web access does not work on Google Cloud Agent Platform** (formerly Vertex AI). Not merely untested: the google-genai SDK raises
   `ValueError: include_server_side_tool_invocations parameter is only supported in Gemini
   Developer API mode` when converting the request. `google_search` and `url_context` themselves
   convert fine, but the flag that lets them share a request with the bridge's file tools is
-  Developer-API only, and the file tools are almost always on. On a Vertex backend the bridge
+  Developer-API only, and the file tools are almost always on. On an Agent Platform backend the bridge
   drops web access rather than failing the call (the tool keeps `write_file`, since no web
   content is in play), and the reply opens with `[sidekick notice] Web access was requested
   but is unavailable on the <method> backend, so this answer is not web-grounded.` That applies
@@ -491,7 +494,8 @@ Gemini chat models on Developer API (Google AI Studio) (17 available):
 Pass model='<id>' to any tool. Omit to use the default (gemini-3.8-flash).
 Or pass flash / flash-lite / pro to get the newest release of that family.
 ```
-On a Vertex backend the header names Vertex AI and the `-latest` aliases are absent from the
+On an Agent Platform backend the header names the backend (`Vertex AI`, its old name, in
+the tool's output) and the `-latest` aliases are absent from the
 catalog (the bridge still accepts them as `model=` values and resolves them itself).
 
 **Diagram:** [diagrams/list-models.mermaid](diagrams/list-models.mermaid) — how `list_models` fetches, filters, caches and falls back.

@@ -71,18 +71,31 @@ instead of a second one:
    **C. Agent Platform.** Ask how to sign in, from `auth_methods` only:
    - `adc` — "gcloud login (Recommended)". If `checks.gcloud` is false, tell
      them to install the Google Cloud CLI first
-     (https://cloud.google.com/sdk/docs/install), then run
-     `gcloud auth application-default login` with `! ` in front so it runs
-     here.
+     (https://cloud.google.com/sdk/docs/install). Then, with `! ` in front so
+     they run here, run `gcloud auth application-default login` and
+     `gcloud auth application-default set-quota-project <PROJECT_ID>` (ask
+     for the project ID first). Without the quota project, calls fail with
+     `403 … quota project not set`.
    - `env` — "Service-account key file". Tell the user: "Run
      `/plugin configure sidekick@sidekick`, and on the **Service-account key
-     file** row paste the path to the JSON key, then press Enter to save." Then use AskUserQuestion: "Done" or "I
+     file** row pick or paste the path to the JSON key, then press Enter to
+     save." Then use AskUserQuestion: "Done" or "I
      export GOOGLE_APPLICATION_CREDENTIALS myself"
      (`checks.google_application_credentials` shows whether it is set here).
      On "Done", add `--sa-file-source 'plugin'` to the write.
-   - `keychain` — "Service account in macOS Keychain" (macOS only): ask for the
-     service and account names (defaults `values.keychain_service`,
-     `values.keychain_account`).
+   - `keychain` — "Service account in macOS Keychain" (macOS only): this setup
+     can't store the key itself. Tell the user to run this in their own
+     terminal, never in this chat and never with `! ` in front:
+
+         security add-generic-password -U -s 'sidekick' -a 'vertex-sa' -w "$(cat /path/to/sa-key.json)"
+
+     then delete the JSON file. (The bare `-w` prompt form keeps the key off
+     the command line, but it takes one short line, so it can't hold the
+     multi-line JSON.) Use AskUserQuestion: "Stored" or "Already stored".
+     Then ask for the service and account names (defaults
+     `values.keychain_service`, `values.keychain_account`; they must match
+     the `-s` and `-a` used). If write fails with `Keychain item not found`,
+     show the store command from its error and ask again.
    Then ask for the GCP project ID and the location (default
    `values.location`; `global` recommended). Write `--auth-method '…'
    --project '…' --location '…'` plus the keychain names when used. Tell them

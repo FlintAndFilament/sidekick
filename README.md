@@ -5,7 +5,6 @@
   <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-blue.svg">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-blue.svg">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-1.28+-green.svg">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-677%20passing-brightgreen.svg">
 </p>
 
 <p align="center">

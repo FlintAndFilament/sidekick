@@ -40,7 +40,7 @@ setup mode comes up.
 | Level | What you see | When to use |
 |---|---|---|
 | `INFO` | Startup: backend, default and fallback model, resolved latest models, transcript path, file-tools state with sandbox root and artifacts directory. Also a file tool that raised, and a grounding redirect that did not resolve | Default — daily use |
-| `WARNING` | Retries on 503/429 and falling back to the fallback model; thinking-level adjustments; web access requested on Agent Platform; a model name that doesn't suit the backend (a preview id on `api_key`, a `-latest` alias on Agent Platform); `inference failed …` before a fallback or retry decision; sandbox rejections; `grep` timeouts; tool-loop round cap; malformed function calls; empty Gemini responses; latest-model resolution failures; transcript write failures | Included at INFO |
+| `WARNING` | Retries on 503/429 and falling back to the fallback model; thinking-level adjustments; web access requested on Google Cloud Agent Platform (formerly Vertex AI); a model name that doesn't suit the backend (a preview id on `api_key`, a `-latest` alias on Agent Platform); `inference failed …` before a fallback or retry decision; sandbox rejections; `grep` timeouts; tool-loop round cap; malformed function calls; empty Gemini responses; latest-model resolution failures; transcript write failures | Included at INFO |
 | `ERROR` | Startup failures (config, auth with method and source, `transcript_dir`, `artifacts_dir`, or an unexpected error with its traceback), after which the server stays up in setup mode; inference failures (with tool + session); fallback also failed; overload after a write (not retried); artifact not saved; `models.list` failures | Included at INFO |
 | `DEBUG` | Per call: tool, session, model, thinking level; request model, prompt length, number of file tools, web on/off; response length; credential loading; session-cache evictions. Also the libraries' own debug output, including one httpx line per HTTP request | Troubleshooting |
 
@@ -54,7 +54,7 @@ setup mode comes up.
 [sidekick] 23:28:31 INFO     sidekick.__main__: file tools enabled — sandbox root /Users/you/dev/my-project — artifacts → /Users/you/dev/my-project/sidekick-artifacts
 ```
 
-On a Vertex backend the first line reads `auth=<method> location=<location>` instead (e.g.
+On an Agent Platform backend the first line reads `auth=<method> location=<location>` instead (e.g.
 `auth=keychain location=global`). If the model catalog can't be read, the second line reads
 `latest models: unresolved (pinned)`. With file tools off, the last line reads
 `file tools DISABLED (<reason>)`.

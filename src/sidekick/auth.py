@@ -7,7 +7,7 @@ Responsibilities:
   - Load Application Default Credentials (ADC) — default method
   - Load service account credentials from GOOGLE_APPLICATION_CREDENTIALS env var
   - Load service account credentials from Apple Keychain (macOS)
-  - Read the Google AI Studio API key from the configured env var (api_key method)
+  - Read the Google AI Studio API key: plugin option first, then the configured env var
   - Build a google.auth.credentials.Credentials instance for any configured method
 
 Design notes:
@@ -38,7 +38,7 @@ import google.auth.credentials
 import google.auth.exceptions
 from google.oauth2 import service_account
 
-from sidekick.config import AuthConfig, ConfigError
+from sidekick.config import AuthConfig, ConfigError, plugin_api_key
 
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
@@ -168,26 +168,38 @@ def _looks_like_api_key(value: str) -> bool:
     return value.startswith("AIza") or not value.replace("_", "").isupper() or len(value) > 40
 
 
+_CONFIGURE_HINT = (
+    "Fix: in Claude Code run /sidekick:setup, or type /plugin, open Installed → sidekick → "
+    "Configure options and paste your key (stored in your system keychain).\n"
+    "Get a key at: https://aistudio.google.com/apikey"
+)
+
+
 def _load_api_key(auth_config: AuthConfig) -> str:
-    """Read Gemini Developer API key from the configured env var. Raises AuthError if unset."""
+    """Read the Gemini Developer API key. Raises AuthError if neither source has one.
+
+    The plugin option (Claude Code secure storage) wins; otherwise the shell env var named by
+    api_key_env, for users who export it themselves (#116)."""
+    from_plugin = plugin_api_key()
+    if from_plugin is not None:
+        _log.debug("api_key loaded from the plugin option")
+        return from_plugin
     env_var = auth_config.api_key_env or "GEMINI_API_KEY"
     if _looks_like_api_key(env_var):
         _log.error("api_key_env looks like a key value, not a variable name")
         raise AuthError(
             "Gemini config error: 'api_key_env' in config.json contains what looks like "
             "an API key, not an environment variable name.\n"
-            'Fix: set api_key_env to the variable name (e.g. "GEMINI_API_KEY"), '
-            "then export that variable:\n"
-            "  export GEMINI_API_KEY=<your-key>\n"
-            "Edit ~/.config/sidekick/config.json or run /sidekick:setup in Claude Code."
+            'Fix: set api_key_env to the variable name (e.g. "GEMINI_API_KEY"), or remove '
+            "the key from config.json and store it in the plugin's options instead.\n"
+            + _CONFIGURE_HINT
         )
     key = os.environ.get(env_var, "").strip()
     if not key:
-        _log.error("api_key env var not set or empty: %s", env_var)
+        _log.error("no api key: plugin option unset and env var %s not set", env_var)
         raise AuthError(
-            f"Gemini auth error: env var {env_var!r} is not set or is empty.\n"
-            f"Fix: export {env_var}=<your-Google-AI-Studio-key>\n"
-            "Get a key at: https://aistudio.google.com/apikey"
+            f"Gemini auth error: no API key. The plugin's key option is empty and env var "
+            f"{env_var!r} is not set.\n" + _CONFIGURE_HINT
         )
     _log.debug("api_key loaded from %s", env_var)
     return key

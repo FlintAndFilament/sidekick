@@ -2,13 +2,34 @@
   "name": "sidekick",
   "version": "0.4.0",
   "description": "A second opinion from Google Gemini inside Claude Code: review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
-  "author": { "name": "FlintAndFilament" },
+  "author": {
+    "name": "FlintAndFilament"
+  },
   "repository": "https://github.com/FlintAndFilament/sidekick",
+  "userConfig": {
+    "gemini_api_key": {
+      "type": "string",
+      "title": "Gemini API key",
+      "description": "Google AI Studio key (aistudio.google.com/apikey). Stored in your system keychain, never in settings files. Leave blank if you use Google Cloud Agent Platform or export the key yourself.",
+      "sensitive": true
+    }
+  },
   "mcpServers": {
     "mcp": {
       "command": "uv",
-      "args": ["run", "--frozen", "--quiet", "--project", "${CLAUDE_PLUGIN_ROOT}", "sidekick"],
-      "env": { "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv", "PYTHONUNBUFFERED": "1" }
+      "args": [
+        "run",
+        "--frozen",
+        "--quiet",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "sidekick"
+      ],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
+        "PYTHONUNBUFFERED": "1",
+        "SIDEKICK_API_KEY": "${user_config.gemini_api_key}"
+      }
     }
   }
 }

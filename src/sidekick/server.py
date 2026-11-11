@@ -42,7 +42,7 @@ from sidekick.tools import (
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace
 
-__all__ = ["build_server", "server_instructions"]
+__all__ = ["build_server", "build_setup_server", "server_instructions"]
 
 _SERVER_NAME = "sidekick"
 
@@ -75,4 +75,32 @@ def build_server(
         ),
         HELP_TOPICS,
     )
+    return mcp
+
+
+def setup_needed_text(problem: str) -> str:
+    """What Claude is told when the server could not start for real (#116)."""
+    return (
+        "sidekick is installed but not set up yet, so its Gemini tools are unavailable.\n\n"
+        f"Problem:\n{problem}\n\n"
+        "Tell the user this in one or two lines and offer to run /sidekick:setup. After they fix "
+        "it, they reconnect with /mcp (plugin:sidekick:mcp → Reconnect) or restart Claude Code."
+    )
+
+
+def build_setup_server(problem: str) -> FastMCP:
+    """A server that stays connected when config or auth is broken.
+
+    Exiting would leave only "Connection closed" in /mcp with no hint; this way Claude can
+    read the problem and walk the user through the fix."""
+    text = setup_needed_text(problem)
+    mcp = FastMCP(_SERVER_NAME, instructions=text)
+
+    @mcp.tool(
+        name="setup_status",
+        description="Why sidekick's Gemini tools are unavailable and how to fix it.",
+    )
+    def setup_status() -> str:
+        return text
+
     return mcp

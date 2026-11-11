@@ -22,6 +22,7 @@ Imports:  sandbox.py (DEFAULT_DENY — stdlib-only module), pydantic
 """
 
 import json
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
@@ -31,6 +32,11 @@ from pydantic import BaseModel, Field, model_validator
 from sidekick.sandbox import DEFAULT_DENY
 
 CONFIG_PATH: Path = Path.home() / ".config" / "sidekick" / "config.json"
+
+# The plugin's masked "Gemini API key" option (plugin.json userConfig). Claude Code keeps the
+# value in the OS credential store (Keychain on macOS) and hands it to the server under this
+# name. Deliberately not GEMINI_API_KEY: a plugin env entry would shadow a real shell export.
+PLUGIN_API_KEY_VAR = "SIDEKICK_API_KEY"
 
 ThinkingLevel = Literal["none", "low", "medium", "high"]
 AuthMethod = Literal["adc", "env", "keychain", "api_key"]
@@ -103,14 +109,34 @@ class Config(BaseModel):
         return self
 
 
+def plugin_api_key() -> Optional[str]:
+    """The key saved in the plugin's options, or None when that option is unset.
+
+    An unset option may arrive as "" or, on some builds, as the literal `${user_config.…}`
+    placeholder; both mean "not configured here"."""
+    value = os.environ.get(PLUGIN_API_KEY_VAR, "").strip()
+    if not value or value.startswith("${"):
+        return None
+    return value
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
-    """Load and validate config from path. Raises ConfigError on any failure."""
+    """Load and validate config from path. Raises ConfigError on any failure.
+
+    With the plugin's API key option filled in, no file is needed and a file that names no
+    auth method defaults to api_key: install, paste the key, done (#116)."""
     if not path.exists():
+        if plugin_api_key() is not None:
+            return Config(auth=AuthConfig(method="api_key"))
         raise ConfigError(f"Config file not found: {path}\nRun /sidekick:setup in Claude Code.")
     try:
         raw = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise ConfigError(f"Config file is not valid JSON ({path}): {exc}") from exc
+    if isinstance(raw, dict) and plugin_api_key() is not None:
+        auth = raw.get("auth")
+        if not (isinstance(auth, dict) and "method" in auth):
+            raw = {**raw, "auth": {**(auth if isinstance(auth, dict) else {}), "method": "api_key"}}
     try:
         return Config(**raw)
     except Exception as exc:

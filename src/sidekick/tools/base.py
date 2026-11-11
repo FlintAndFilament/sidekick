@@ -340,6 +340,9 @@ async def call_gemini(
                 name=session.name,
             )
         )
+        # Turns the stand-in starts with; anything past this index is this call's new turn,
+        # even if a concurrent call on the same session commits while the fallback runs.
+        base = len(target.history)
         answer = await client.ask(
             target,
             prompt,
@@ -350,7 +353,7 @@ async def call_gemini(
             web=caps.web,
         )
         if target is not session:
-            session.history.extend(target.history[len(session.history) :])
+            session.history.extend(target.history[base:])
         return answer
 
     fallback_at: Optional[int] = None  # records index where the fallback attempt began

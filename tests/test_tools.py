@@ -506,13 +506,8 @@ class TestArtifacts:
         tools = {t.name: t for t in asyncio.run(mcp.list_tools())}  # type: ignore[attr-defined]
         assert "write_artifact" not in tools["ask"].inputSchema["properties"]
         assert "write_artifact" not in tools["debug"].inputSchema["properties"]
-        assert (
-            tools["architect"].inputSchema["properties"]["write_artifact"]["default"] is True
-        )
-        assert (
-            tools["brainstorm"].inputSchema["properties"]["write_artifact"]["default"]
-            is False
-        )
+        assert tools["architect"].inputSchema["properties"]["write_artifact"]["default"] is True
+        assert tools["brainstorm"].inputSchema["properties"]["write_artifact"]["default"] is False
 
 
 class TestFallbackAfterTools:

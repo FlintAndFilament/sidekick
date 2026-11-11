@@ -155,9 +155,7 @@ class TestRegisteredDescriptions:
         assert annotations is not None and annotations.destructiveHint is True
 
     def test_list_models_is_not_given_a_file_hint(self, tmp_path: Path) -> None:
-        described = _tools(_server(tmp_path, _workspace(tmp_path)))[
-            "list_models"
-        ].description
+        described = _tools(_server(tmp_path, _workspace(tmp_path)))["list_models"].description
         assert "read_file" not in (described or "")
 
 
@@ -512,9 +510,7 @@ class TestListModelsAnnotations:
     """The only tool that writes nothing must say so — absent hints mean the opposite."""
 
     def test_declared_read_only_and_non_destructive(self, tmp_path: Path) -> None:
-        annotations = _tools(_server(tmp_path, _workspace(tmp_path)))[
-            "list_models"
-        ].annotations
+        annotations = _tools(_server(tmp_path, _workspace(tmp_path)))["list_models"].annotations
         assert annotations is not None
         assert annotations.readOnlyHint is True
         assert annotations.destructiveHint is False

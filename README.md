@@ -2,7 +2,7 @@
 <h4 align="center">Gemini as a live second opinion for Claude Code — reads your repo, searches the web with real sources, keeps sessions and transcripts.</h4>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-blue.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-blue.svg">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-blue.svg">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-1.28+-green.svg">
   <img alt="Tests" src="https://img.shields.io/badge/tests-677%20passing-brightgreen.svg">

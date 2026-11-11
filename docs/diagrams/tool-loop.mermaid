@@ -1,0 +1,28 @@
+flowchart TD
+    A["client.ask(): history + prompt,<br/>registry (file tools, maybe empty)"] --> CFG["build_config(): file-tool declarations;<br/>web on → + google_search + url_context<br/>+ include_server_side_tool_invocations<br/>(Developer API only; dropped on Vertex)"]
+    CFG --> R["round n of 20: generate_content<br/>(503/429 retried with backoff)"]
+    R --> NC{no candidates?}
+    R -->|"still failing after 3 retries,<br/>or other API error"| E3[ClientError: inference failed]
+    NC -->|yes| E1[ClientError: no text]
+    NC -->|no| MF{MALFORMED_FUNCTION_CALL?}
+    MF -->|"yes, under 3 in a row"| R
+    MF -->|3 in a row| E2[ClientError: malformed]
+    MF -->|no| G["record_grounding(): server-side searches<br/>and URL fetches → records"]
+    G --> FC{function calls in the turn?}
+    FC -->|no| ANS{answer has text?}
+    FC -->|yes| D["registry.dispatch() each call in order<br/>via Sandbox; never raises:<br/>unknown tool / failure → {error: …}"]
+    D --> REC[append ToolCallRecord per call]
+    REC --> SEND[all results sent back in one user turn]
+    SEND --> CAPQ{20 rounds used?}
+    CAPQ -->|no| R
+    CAPQ -->|yes| F["'Tool budget exhausted — answer now'<br/>one more call, function calling mode NONE"]
+    F --> ANS
+    ANS -->|yes| OK["LoopResult: text, tool traffic stripped;<br/>only prompt + answer committed to session"]
+    ANS -->|no| E1
+    E1 --> FB
+    E2 --> FB
+    E3 --> FB
+    FB{"call_gemini() catches ClientError:<br/>503/429 and not already on fallback?"}
+    FB -->|"yes, but write_file already succeeded"| ERR["[sidekick error] … not retried:<br/>files were already written"]
+    FB -->|yes, no writes| RETRY[rerun whole loop once on newest Flash-Lite]
+    FB -->|no| ERR2["[sidekick error] …"]

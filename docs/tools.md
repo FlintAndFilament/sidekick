@@ -48,6 +48,8 @@ Gemini never touches disk itself: it *requests* a tool call, and the bridge runs
 inside a sandbox, then sends the result back. One MCP call allows up to 20 rounds of such
 requests; after that Gemini is told to answer with what it has.
 
+**Diagram:** [diagrams/tool-loop.mermaid](diagrams/tool-loop.mermaid) — how one call's function-calling loop runs, caps, and ends.
+
 | Tool | Read tools | `write_file` | Saves answer as artifact |
 |---|---|---|---|
 | `ask` | ✅ | — | — |
@@ -92,6 +94,8 @@ A result that hits a cap is flagged `truncated=true`; a `grep` that runs out of 
   bridge returns an error instead of re-running the call on the fallback model, so writes are
   never replayed.
 - Every call, including rejections, is listed under **Tool calls** in the transcript entry.
+
+**Diagram:** [diagrams/file-sandbox.mermaid](diagrams/file-sandbox.mermaid) — how each file-tool call is checked against the sandbox and served.
 
 **How the calling client learns about this.** The capability is advertised to the MCP client,
 not just to Gemini, so a Claude session knows to name paths instead of pasting file contents and

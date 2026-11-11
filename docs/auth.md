@@ -322,6 +322,6 @@ server treats both as unset.
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |
 | `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Paste the key on the **Gemini API key** row, then restart ([how](#change-settings--reconnect)) |
 | `'api_key_env' in config.json contains what looks like an API key` | The key itself was put in `api_key_env` | Set `api_key_env` to the variable name, e.g. `"GEMINI_API_KEY"` |
-| `'project' is required for Vertex AI auth methods` | `project` missing with `adc`/`env`/`keychain` (the message still uses the old name) | Add `project` to config.json, or switch to `api_key` |
+| `'project' is required for Google Cloud Agent Platform auth methods` | `project` missing with `adc`/`env`/`keychain` | Add `project` to config.json, or switch to `api_key` |
 | `transcript_dir: Transcript directory cannot be used` / `artifacts_dir …` | A configured directory can't be created, or lies outside the project | See [`transcript_dir`](configuration.md#transcript_dir) and [`artifacts_dir`](configuration.md#artifacts_dir) |
 | `Web access was requested but is unavailable` | `web=true` on an Agent Platform method | Use `api_key` for web access |

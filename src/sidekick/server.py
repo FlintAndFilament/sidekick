@@ -78,8 +78,18 @@ def build_server(
     return mcp
 
 
+# Claude Code truncates server instructions at about 2048 characters, so the problem text is
+# capped to leave room for the fixed wording around it (#121).
+_PROBLEM_CAP = 1500
+
+
 def setup_needed_text(problem: str) -> str:
     """What Claude is told when the server could not start for real (#116)."""
+    if len(problem) > _PROBLEM_CAP:
+        problem = (
+            problem[:_PROBLEM_CAP].rstrip()
+            + "\n… (truncated; the full message is in ~/.config/sidekick/logs/)"
+        )
     return (
         "sidekick is installed but not set up yet, so its Gemini tools are unavailable.\n\n"
         f"Problem:\n{problem}\n\n"

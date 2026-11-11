@@ -270,7 +270,7 @@ _LOADERS: dict[str, _CredLoader] = {
 
 
 def build_credentials(auth_config: AuthConfig) -> google.auth.credentials.Credentials:
-    """Build Vertex AI credentials from the given auth config. Raises AuthError on failure."""
+    """Build Agent Platform (Vertex AI) credentials from the given auth config. Raises AuthError on failure."""
     loader = _LOADERS.get(auth_config.method)
     if loader is None:
         raise ConfigError(f"Unknown auth method: {auth_config.method!r}")

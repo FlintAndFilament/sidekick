@@ -106,7 +106,7 @@ class Config(BaseModel):
     def project_required_for_vertex(self) -> "Config":
         if self.auth.method != "api_key" and not self.project:
             raise ValueError(
-                "'project' is required for Vertex AI auth methods (adc, env, keychain). "
+                "'project' is required for Google Cloud Agent Platform auth methods (adc, env, keychain). "
                 "Add it to config.json or switch to method='api_key'."
             )
         return self

@@ -149,3 +149,18 @@ async def test_setup_status_tool_returns_the_fix() -> None:
     text = json.dumps(result, default=str)
     assert "no key: open Configure options" in text
     assert "/sidekick:setup" in text
+
+
+def test_a_crash_while_serving_is_not_treated_as_a_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Server:
+        def run(self) -> None:
+            raise OSError("stdio closed")
+
+    monkeypatch.setattr(entry, "_start", lambda: _Server())
+    served: list[str] = []
+    monkeypatch.setattr(entry, "_serve_setup_problem", served.append)
+    with pytest.raises(OSError):
+        entry.main()
+    assert served == []  # no second server on an already-initialized stdio

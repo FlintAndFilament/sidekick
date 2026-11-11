@@ -92,3 +92,10 @@ def test_setup_server_instructions_are_the_capped_text(tmp_path: Path) -> None:
     server = build_setup_server(problem)
     assert server.instructions == setup_needed_text(problem)
     assert server.instructions is not None and len(server.instructions) < INSTRUCTIONS_BUDGET
+
+
+def test_any_problem_length_fits_under_the_cap() -> None:
+    # A config with many invalid fields produced >2000 chars before the cap (#121).
+    text = setup_needed_text("field: bad value\n" * 400)
+    assert len(text) < 2000
+    assert "truncated" in text

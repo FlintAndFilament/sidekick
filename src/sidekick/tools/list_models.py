@@ -37,7 +37,7 @@ LIST_MODELS_TOOL_NAME = _TOOL_NAME
 
 _BACKEND_LABEL = {
     models.DEVELOPER_API: "Developer API (Google AI Studio)",
-    models.VERTEX: "Vertex AI",
+    models.VERTEX: "Google Cloud Agent Platform (Vertex AI)",
 }
 
 

@@ -167,9 +167,3 @@ def test_manifest_declares_the_sa_file_picker() -> None:
     env = plugin["mcpServers"]["mcp"]["env"]
     assert env["SIDEKICK_SA_FILE"] == "${user_config.service_account_file}"
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in env
-
-
-def test_setup_mode_instructions_stay_under_the_cap() -> None:
-    # Claude Code truncates server instructions at ~2048 chars; the fixed text leaves room
-    # for the problem message.
-    assert len(setup_needed_text("")) < 500

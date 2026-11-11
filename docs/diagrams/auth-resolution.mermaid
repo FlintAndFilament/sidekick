@@ -1,0 +1,36 @@
+flowchart TD
+    START(["server startup"]) --> CFG{"config.json<br/>names auth.method?"}
+    CFG -->|yes| M{"method"}
+    CFG -->|"no (or no file)"| PK{"plugin Gemini API key<br/>option filled in?"}
+    PK -->|yes| AK
+    PK -->|"no, file exists"| ADC
+    PK -->|"no, no file"| SETUP
+
+    M -->|api_key| AK
+    M -->|adc| ADC
+    M -->|env| ENVM
+    M -->|keychain| KC
+
+    AK["api_key"] --> AK1{"SIDEKICK_API_KEY<br/>(plugin option) set?"}
+    AK1 -->|yes| DEV(["Gemini Developer API<br/>with that key"])
+    AK1 -->|no| AK2{"env var named by<br/>api_key_env (GEMINI_API_KEY)?"}
+    AK2 -->|set| DEV
+    AK2 -->|unset| SETUP
+
+    ADC["adc"] --> ADC1{"google.auth.default()<br/>GOOGLE_APPLICATION_CREDENTIALS first,<br/>then gcloud ADC"}
+    ADC1 -->|found| AP(["Google Cloud Agent Platform<br/>project + location"])
+    ADC1 -->|none| SETUP
+
+    ENVM["env"] --> E1{"SIDEKICK_SA_FILE<br/>(plugin file picker) set?"}
+    E1 -->|no| E2{"GOOGLE_APPLICATION_CREDENTIALS<br/>set?"}
+    E1 -->|yes| E3
+    E2 -->|yes| E3{"path-shaped and the<br/>file loads as a service account?"}
+    E2 -->|no| SETUP
+    E3 -->|yes| AP
+    E3 -->|"no (value withheld if not a path)"| SETUP
+
+    KC["keychain (macOS)"] --> K1{"security find-generic-password<br/>service / account"}
+    K1 -->|"service-account JSON"| AP
+    K1 -->|"missing or not an SA"| SETUP
+
+    SETUP(["setup mode<br/>only setup_status, with the fix"])

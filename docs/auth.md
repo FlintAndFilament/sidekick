@@ -18,6 +18,9 @@ saved:** with the plugin's **Gemini API key** option filled in and no `auth.meth
 names no method means `adc`. With neither a key nor a file, the server starts in setup mode.
 A method saved in `config.json` always wins, even over a filled-in key option.
 
+[Diagram](diagrams/auth-resolution.mermaid): which credential each method uses, in order, and
+every path into setup mode.
+
 The three Agent Platform methods only differ in where the credentials come from; they share the
 same models, `project`/`location` settings and IAM role (`roles/aiplatform.user`). **Web access
 needs `api_key`**: on Agent Platform the bridge drops `web=true`, answers without the web and
@@ -44,6 +47,9 @@ runs that check for you.
 | **A. API key in the keychain** (recommended) | Paste a Google AI Studio key into the plugin's masked **Gemini API key** option | none |
 | **B. API key from an env var** | Export the key yourself (CI, scripts, Linux, Windows) | yes |
 | **C. Google Cloud Agent Platform** | gcloud login (ADC), a service-account file (picked in the plugin options), or a service account in macOS Keychain, plus a GCP project | none |
+
+[Diagram](diagrams/setup-flow.mermaid): the three `/sidekick:setup` paths, through to the live
+`list_models` check.
 
 To change or reset anything later, see [Change settings & reconnect](#change-settings--reconnect).
 

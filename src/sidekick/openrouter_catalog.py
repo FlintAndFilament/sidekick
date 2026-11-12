@@ -227,6 +227,74 @@ def free_candidates(catalog: Sequence[ORModel]) -> list[str]:
     return preferred + [m.id for m in rest]
 
 
+def featured(catalog: Sequence[ORModel], default_model: str, free: Sequence[str]) -> list[ORModel]:
+    """The setup picks present in the catalog, then the free models, then the default if missing."""
+    by_id = {m.id: m for m in catalog}
+    ids = [i for i, _ in SETUP_PICKS] + list(free) + [default_model]
+    seen: set[str] = set()
+    rows: list[ORModel] = []
+    for model_id in ids:
+        if model_id in by_id and model_id not in seen:
+            seen.add(model_id)
+            rows.append(by_id[model_id])
+    return rows
+
+
+def search(catalog: Sequence[ORModel], query: str) -> list[ORModel]:
+    """Text-chat models whose id or name contains the query (case-insensitive), by id."""
+    needle = query.lower()
+    hits = [
+        m for m in catalog if m.text_chat and (needle in m.id.lower() or needle in m.name.lower())
+    ]
+    return sorted(hits, key=lambda m: m.id)
+
+
+def price_cell(model: ORModel) -> str:
+    if model.free:
+        return "free"
+    if model.prompt_price is None or model.completion_price is None:
+        return "varies"
+    return f"{format_price(model.prompt_price)} / {format_price(model.completion_price)}"
+
+
+def privacy_marker(status: Optional[PrivacyStatus]) -> str:
+    if status is PrivacyStatus.ALL_MAY_COLLECT:
+        return "privacy: every provider may store/train"
+    if status is PrivacyStatus.SOME_MAY_COLLECT:
+        return "privacy: some providers may store/train"
+    if status is PrivacyStatus.UNKNOWN:
+        return "privacy: unknown"
+    return "privacy: not checked"
+
+
+def format_rows(
+    rows: Sequence[ORModel],
+    *,
+    default_model: str,
+    free_default: str,
+    privacy: Mapping[str, PrivacyStatus],
+) -> list[str]:
+    """One aligned line per model: id, price, context, privacy marker, tags, name."""
+    if not rows:
+        return []
+    labels = dict(SETUP_PICKS)
+    width = max(len(m.id) for m in rows)
+    lines = []
+    for m in rows:
+        tags = ""
+        if m.id == default_model:
+            tags += "  (default)"
+        elif m.id == free_default:
+            tags += "  (free default)"
+        if m.id in labels:
+            tags += "  — " + labels[m.id]
+        lines.append(
+            f"  {m.id.ljust(width)}  {price_cell(m)}  {format_context(m.context_length)} ctx  "
+            f"{privacy_marker(privacy.get(m.id))}{tags}  ({m.name})"
+        )
+    return lines
+
+
 def map_effort(level: ThinkingLevel, model: Optional[ORModel]) -> Optional[str]:
     """The reasoning effort to send for a sidekick level, or None to omit the field."""
     if model is None:

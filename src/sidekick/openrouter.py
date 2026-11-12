@@ -190,6 +190,10 @@ class OpenRouterClient:
         return self.resolve_model(None)
 
     @property
+    def block_data_collection(self) -> bool:
+        return self._config.openrouter.block_data_collection
+
+    @property
     def catalog(self) -> list[ORModel]:
         return self._catalog
 

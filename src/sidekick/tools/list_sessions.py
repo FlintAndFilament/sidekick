@@ -76,7 +76,7 @@ def register(mcp: FastMCP, client: ModelSource) -> None:
         )
     )
     def list_sessions() -> ToolResult:
-        """List the Gemini conversations this server holds in memory.
+        """List the conversations this server holds in memory.
 
         Shows each one's tool, session_name, model and number of turns, most recently used
         first. Use it to find a conversation to continue after a gap or a context compaction.

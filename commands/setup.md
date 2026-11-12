@@ -71,7 +71,10 @@ instead of a second one:
       "moonshotai/kimi-k3.1-pro: best quality", "x-ai/grok-4.7". The automatic
       "Other" takes any id (for example `qwen/qwen3.8-max-0902` or
       `google/gemini-3.8-flash`). On "Free model (skip)", use the id marked
-      `(free default)`.
+      `(free default)`. If the "Other" answer looks like a key (`sk-or-`,
+      `AIza`, `AQ`, or `private_key` JSON), apply the key rule: do not run any
+      command with it, and tell the user to paste keys only in the plugin
+      option.
    3. Call `list_models(check='<id>')` and show its privacy sentence verbatim.
       For a free model, also show its limits line (it says free models allow
       20 requests a minute and 50 a day) and say: "Free models are often served

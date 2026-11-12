@@ -111,10 +111,11 @@ def register(
             Optional[bool],
             Field(
                 description=(
-                    "Let the model search the web (Gemini models only; ignored with a notice on OpenRouter) and fetch URLs for this call. Omit to use the "
-                    "server default. Retrieved pages are untrusted text, so while web "
-                    "access is on write_file is withheld and the model cannot modify the "
-                    "working tree."
+                    "Let the model search the web (Gemini models only; ignored with a "
+                    "notice on OpenRouter) and fetch URLs for this call. Omit to use the "
+                    "server default. Retrieved pages are untrusted text, so on Gemini, "
+                    "while web access is on write_file is withheld and the model cannot "
+                    "modify the working tree."
                 )
             ),
         ] = None,

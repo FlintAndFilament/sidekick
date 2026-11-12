@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import pytest
 
+from sidekick.backends import Surface
 from sidekick.guide import HELP_TOPICS, INSTRUCTIONS_BUDGET, help_text, server_instructions
 from sidekick.tools import CAPABILITIES, HELP_TOOL_NAME, LIST_MODELS_TOOL_NAME
 from sidekick.transcript import TranscriptWriter
@@ -40,6 +41,18 @@ def _variants(tmp_path: Path) -> dict[str, dict[str, Any]]:
         "vertex": {"workspace": _workspace(tmp_path), "web_supported": False},
         "long-root": {"workspace": _workspace(_long_root(tmp_path))},
         "long-deny": {"workspace": _workspace(tmp_path, deny=long_deny)},
+        "openrouter": {
+            "workspace": _workspace(tmp_path),
+            "surface": Surface("openrouter", False, False, False, False),
+        },
+        "openrouter+gemini": {
+            "workspace": _workspace(tmp_path),
+            "surface": Surface("openrouter", False, False, False, True),
+        },
+        "openrouter-long-root": {
+            "workspace": _workspace(_long_root(tmp_path)),
+            "surface": Surface("openrouter", False, False, False, True),
+        },
     }
 
 
@@ -55,6 +68,9 @@ VARIANTS = (
     "vertex",
     "long-root",
     "long-deny",
+    "openrouter",
+    "openrouter+gemini",
+    "openrouter-long-root",
 )
 
 
@@ -84,6 +100,60 @@ class TestInstructionsFitTheClientCap:
         text = _instructions(tmp_path, variant)
         for topic in ("files", "web", "sessions", "disk"):
             assert topic in text
+
+
+INTRO = (
+    "sidekick: a second opinion from the model you choose (OpenRouter, or Google Gemini directly)."
+)
+
+
+class TestOpenRouterSurface:
+    @pytest.mark.parametrize("variant", VARIANTS)
+    def test_every_variant_leads_with_the_choice(self, tmp_path: Path, variant: str) -> None:
+        assert _instructions(tmp_path, variant).startswith(INTRO)
+
+    def test_openrouter_instructions_say_paste_and_name_no_file_tools(self, tmp_path: Path) -> None:
+        text = _instructions(tmp_path, "openrouter")
+        assert "conversation only" in text
+        assert "list_dir" not in text and "write_file" not in text
+        assert "name paths" not in text and "Gemini reads" not in text
+
+    def test_openrouter_with_gemini_points_to_the_override(self, tmp_path: Path) -> None:
+        text = _instructions(tmp_path, "openrouter+gemini")
+        assert "model=flash, flash-lite, pro or gemini-* runs on Gemini" in text
+
+    def test_openrouter_web_row(self, tmp_path: Path) -> None:
+        text = _instructions(tmp_path, "openrouter")
+        assert "Web: none for OpenRouter models; web=true is ignored with a notice." in text
+
+    def test_gemini_only_keeps_the_gemini_wording(self, tmp_path: Path) -> None:
+        text = _instructions(tmp_path, "files-on")
+        assert "Gemini reads files" in text and "name paths" in text
+
+    @pytest.mark.parametrize("topic", ["files", "web"])
+    def test_openrouter_help_topics_lead_with_the_sentence(
+        self, tmp_path: Path, topic: str
+    ) -> None:
+        surface = Surface("openrouter", False, False, False, False)
+        text = help_text(_workspace(tmp_path), topic=topic, surface=surface)
+        assert "OpenRouter" in text and "Gemini reads" not in text
+
+    def test_models_topic_explains_routing_prices_and_privacy(self, tmp_path: Path) -> None:
+        surface = Surface("openrouter", False, False, False, True)
+        text = help_text(_workspace(tmp_path), topic="models", surface=surface)
+        for needle in (
+            'provider.data_collection: "deny"',
+            "Safety Retention",
+            "not guaranteed",
+            "openrouter.ai/settings/privacy",
+            "20 requests a minute",
+            "accepted_models",
+            "google/<id>",
+        ):
+            assert needle in text, needle
+
+    def test_models_is_a_help_topic(self) -> None:
+        assert "models" in HELP_TOPICS
 
 
 class TestKeyRulesSurviveTheCut:

@@ -58,7 +58,7 @@ def build_server(
     mcp = FastMCP(
         _SERVER_NAME,
         instructions=server_instructions(
-            workspace, transcript, client.web_default, client.web_supported
+            workspace, transcript, client.web_default, client.web_supported, surface=client.surface
         ),
     )
     register_ask(mcp, client, transcript, workspace)
@@ -71,7 +71,12 @@ def build_server(
     register_help(
         mcp,
         lambda topic: help_text(
-            workspace, transcript, client.web_default, client.web_supported, topic=topic
+            workspace,
+            transcript,
+            client.web_default,
+            client.web_supported,
+            topic=topic,
+            surface=client.surface,
         ),
         HELP_TOPICS,
     )

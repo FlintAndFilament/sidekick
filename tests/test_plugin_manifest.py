@@ -75,4 +75,4 @@ def test_setup_leads_with_openrouter_and_shows_price_and_privacy() -> None:
         "has no billing",
     ):
         assert needle in text
-    assert text.index("OpenRouter") < text.index("Google AI Studio")
+    assert text.index("**O. OpenRouter.**") < text.index("**A. Keychain.**")

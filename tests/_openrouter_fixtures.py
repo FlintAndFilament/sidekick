@@ -1,6 +1,17 @@
 """OpenRouter test data shaped like the live catalog (fields verified 2026-11-11)."""
 
+import json
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+import httpx
+
+from sidekick.config import Config
+from sidekick.openrouter import OpenRouterClient
+from tests._fakes import FAKE_OPENROUTER_KEY
 
 
 def entry(
@@ -111,3 +122,68 @@ def reply(text: str | None = "fine", finish: str = "stop") -> dict[str, Any]:
     return {
         "choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": finish}]
     }
+
+
+@dataclass
+class FakeOpenRouter:
+    """A MockTransport handler: serves the catalog and replays scripted chat replies."""
+
+    catalog: list[dict[str, Any]] = field(default_factory=lambda: list(CATALOG))
+    catalog_status: int = 200
+    replies: list[tuple[int, Any]] = field(default_factory=lambda: [(200, reply())])
+    requests: list[httpx.Request] = field(default_factory=list)
+    sleeps: list[float] = field(default_factory=list)
+    _served: int = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET" and request.url.path == "/api/v1/models":
+            return httpx.Response(self.catalog_status, json={"data": self.catalog})
+        assert request.url.path == "/api/v1/chat/completions"
+        status, body = self.replies[min(self._served, len(self.replies) - 1)]
+        self._served += 1
+        if isinstance(body, Exception):
+            raise body
+        if isinstance(body, str):
+            return httpx.Response(status, text=body, headers={"content-type": "text/html"})
+        return httpx.Response(status, json=body)
+
+    @property
+    def posts(self) -> list[dict[str, Any]]:
+        return [json.loads(r.content) for r in self.requests if r.method == "POST"]
+
+    @property
+    def gets(self) -> int:
+        return sum(1 for r in self.requests if r.method == "GET")
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self)
+
+
+def make_client(
+    fake: FakeOpenRouter,
+    tmp_path: Path,
+    *,
+    clock: Callable[[], float] | None = None,
+    **openrouter: Any,
+) -> OpenRouterClient:
+    cfg = Config.model_validate(
+        {"openrouter": openrouter, "transcript_dir": str(tmp_path)},
+        context={"openrouter_key": True},
+    )
+    t = fake.transport()
+
+    async def sleep(delay: float) -> None:
+        fake.sleeps.append(delay)
+
+    client = OpenRouterClient(
+        cfg,
+        FAKE_OPENROUTER_KEY,
+        transport=t,
+        sync_transport=t,
+        config_path=tmp_path / "config.json",
+        sleep=sleep,
+        clock=clock or time.monotonic,
+    )
+    client.refresh_catalog()
+    return client

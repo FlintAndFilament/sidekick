@@ -75,7 +75,10 @@ async def test_unattended_send_forces_deny_routing(tmp_path):  # owner 2026-11-1
     c = make_client(fake, tmp_path)
     assert (await c.preflight(GROK, None)).proceed
     await c.ask(c.get_or_create_session("ask:s", GROK), "hi")
-    assert fake.posts[-1]["provider"] == {"data_collection": "deny"}
+    assert len(fake.posts) == 2  # the privacy probe, then the chat request
+    chat = fake.posts[1]
+    assert chat["messages"][-1]["content"] == "hi"
+    assert chat["provider"] == {"data_collection": "deny"}
 
 
 @pytest.mark.parametrize(

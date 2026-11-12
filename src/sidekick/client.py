@@ -33,8 +33,8 @@ import asyncio
 import logging
 import random
 import re
+import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
@@ -46,12 +46,20 @@ from google.genai.types import GenerateContentConfig, ThinkingConfig
 from google.genai.types import ThinkingLevel as SDKThinkingLevel
 
 from sidekick import models
+from sidekick.backends import Elicit, Preflight, Session, Surface
 from sidekick.config import Config, ModelFamily, ThinkingLevel
 from sidekick.errors import ClientError
 from sidekick.tool_loop import ToolCallRecord, ToolRegistry, run_tool_loop
 from sidekick.web_tools import web_tool_set
 
-__all__ = ["ClientError", "GeminiClient", "Session", "DEFAULT_MODEL", "FALLBACK_MODEL"]
+__all__ = [
+    "ClientError",
+    "GeminiClient",
+    "Session",
+    "DEFAULT_MODEL",
+    "FALLBACK_MODEL",
+    "GEMINI_UNPAID_NOTICE",
+]
 
 # Offline defaults (#69). At startup the bridge resolves the newest Flash / Flash-Lite / Pro from
 # the live catalog (refresh_latest); these pinned, known-good ids are used only when that catalog
@@ -98,6 +106,18 @@ _MAX_THINKING_ADJUSTMENTS = 2  # per request: e.g. switch to budget, then raise 
 _LEVEL_REJECTED = re.compile(r"Thinking level (\w+) is not supported for this model")
 _LEVEL_UNSUPPORTED = "Thinking level is not supported for this model"
 _BUDGET_ZERO_REJECTED = re.compile(r"Budget 0 is invalid|only works in thinking mode")
+
+GEMINI_UNPAID_NOTICE = (
+    "[sidekick notice] If this Gemini API key's Cloud project has no billing, Google may use "
+    "your prompts and responses to improve its products. block_data_collection does not apply "
+    "to Gemini.\n\n"
+)
+
+_NO_OPENROUTER_KEY = (
+    "`{model}` is an OpenRouter model id, but no OpenRouter key is set. Fix: run /plugin "
+    "configure sidekick@sidekick, paste your key on the OpenRouter API key row, press Enter, "
+    "then run /reload-plugins."
+)
 
 MAX_SESSIONS = 50  # LRU cap; oldest session evicted when exceeded
 _MAX_RETRIES = 3
@@ -158,25 +178,21 @@ def _model_family(model: str) -> ModelFamily:
     )
 
 
-@dataclass
-class Session:
-    """One named conversation: its model and the committed history (prompts + final answers)."""
-
-    model: str
-    history: list[types.Content] = field(default_factory=list)
-    name: str = ""  # the cache name, "<tool>:<session_name>" — for list_sessions
-
-
 class GeminiClient:
     """Manages persistent Gemini chat sessions and provides a unified ask() interface."""
+
+    name = "gemini"
 
     def __init__(
         self,
         config: Config,
         credentials: Optional[google.auth.credentials.Credentials] = None,
         api_key: Optional[str] = None,
+        *,
+        unpaid_tier_notice: bool = False,
     ) -> None:
         self._config = config
+        self._notice_pending = unpaid_tier_notice
         if api_key:
             self._raw_client = genai.Client(api_key=api_key)
         else:
@@ -214,7 +230,9 @@ class GeminiClient:
         cache_key = f"{name}:{effective_model}"
         if cache_key in self._sessions:
             self._sessions.move_to_end(cache_key)
-            return self._sessions[cache_key]
+            session = self._sessions[cache_key]
+            session.used_at = time.monotonic()
+            return session
         session = Session(model=effective_model, name=name)
         self._sessions[cache_key] = session
         if len(self._sessions) > MAX_SESSIONS:
@@ -225,6 +243,51 @@ class GeminiClient:
     def sessions(self) -> list[Session]:
         """The live sessions, most recently used first. Makes no API call."""
         return list(reversed(self._sessions.values()))
+
+    @property
+    def label(self) -> str:
+        return self.auth_method
+
+    @property
+    def supports_files(self) -> bool:
+        return True
+
+    def backend_for(self, model: Optional[str]) -> "GeminiClient":
+        """This client, unless `model` is an OpenRouter id this Gemini-only server cannot run."""
+        if model and models.is_openrouter_id(model):
+            raise ClientError(_NO_OPENROUTER_KEY.format(model=model))
+        return self
+
+    def backends(self) -> list["GeminiClient"]:
+        return [self]
+
+    def fallback_for(self, model: str) -> Optional[str]:
+        """The model to retry on after a terminal 503/429, or None when already on it."""
+        return None if model == self.fallback_model else self.fallback_model
+
+    def can_fall_back(self, exc: ClientError) -> bool:
+        return _is_retryable(exc)
+
+    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight:
+        """Nothing to confirm for Gemini; optionally a one-time unpaid-tier privacy notice."""
+        if self._notice_pending:
+            self._notice_pending = False
+            return Preflight(True, notice=GEMINI_UNPAID_NOTICE)
+        return Preflight(True)
+
+    @property
+    def surface(self) -> Surface:
+        return Surface("gemini", True, self.web_supported, self.web_default, True)
+
+    def model_hint(self) -> str:
+        """Backend-aware description for the `model` param, computed once at tool registration.
+
+        api_key mode surfaces the Developer-API shortlist (incl. '-latest' aliases); Vertex
+        modes surface the alias-free Vertex shortlist.
+        """
+        return models.schema_hint(
+            models.backend_for(self.auth_method), self.default_model, self.resolved_latest
+        )
 
     @property
     def default_thinking(self) -> ThinkingLevel:

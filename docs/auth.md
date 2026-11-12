@@ -1,5 +1,33 @@
 # Authentication
 
+## OpenRouter API key (recommended)
+
+sidekick can serve any model on [OpenRouter](https://openrouter.ai) (Grok, Kimi, DeepSeek, Qwen,
+GPT, Claude, Gemini and more) with a single key from
+[openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Run `/sidekick:setup` and pick
+path **O**: it shows live prices, runs a privacy check and offers a free model.
+
+- **Plugin option (recommended).** Paste the key into the masked **OpenRouter API key** row of
+  `/plugin configure sidekick@sidekick`, then run `/reload-plugins`. Claude Code keeps it in the
+  system keychain.
+- **Shell fallback.** Export `OPENROUTER_API_KEY` in the environment Claude Code starts from. The
+  plugin option wins when both are set.
+- **Server env var.** The plugin option reaches the server as `SIDEKICK_OPENROUTER_KEY`; see
+  [How the plugin options reach the server](#how-the-plugin-options-reach-the-server).
+- **The key is never sent to the catalog.** The public model catalog is fetched without it. The
+  key goes only to OpenRouter's chat endpoint, and is never written to `config.json`.
+- **Gemini stays available alongside it.** With both configured, `flash`, `flash-lite`, `pro`
+  and `gemini-*` still run on Gemini directly. If Gemini auth fails while an OpenRouter key is
+  set, the server serves OpenRouter only and logs a warning. See
+  [backend-routing](diagrams/backend-routing.mermaid).
+
+OpenRouter models are conversation only: they cannot read your repository or search the web.
+Prices, the first-use question and privacy settings: [configuration.md](configuration.md#openrouteraccepted_models).
+
+The rest of this page covers the Gemini backends.
+
+---
+
 sidekick talks to Gemini through one of two Google backends: the **Gemini Developer API**
 (Google AI Studio, an API key) or **Google Cloud Agent Platform** (formerly Vertex AI, a GCP
 project). There are four auth methods, set by `auth.method` in
@@ -40,7 +68,8 @@ it as `[sidekick notice] Live model list unavailable (…)`; the last step of `/
 runs that check for you.
 
 **Setting up auth.** Install the plugin (`/plugin install sidekick@sidekick`), then run
-`/sidekick:setup`. It offers three paths and walks you through the one you pick:
+`/sidekick:setup`. It offers the OpenRouter path (O, above) and three Gemini paths, and walks you
+through the one you pick:
 
 | Path | What you do | Shell setup |
 |---|---|---|
@@ -142,6 +171,9 @@ switch from an Agent Platform method, the old values stay in the file, unused.
   `config.json`
 - This is the only method with web access (`web=true`, `web_tools.enabled`); see
   [tools.md](tools.md#web-access)
+
+**Unpaid tier:** if the key's Cloud project has no billing, Google may use your prompts and
+responses to improve its products. `block_data_collection` does not apply to Gemini.
 
 **Quota:** AI Studio rate limits depend on the model and on whether billing is enabled for the
 key; check the current limits in AI Studio. Limits are generally lower than on Agent Platform.
@@ -296,11 +328,12 @@ macOS only. The `security` CLI is not available on Linux, and `/sidekick:setup` 
 
 ## How the plugin options reach the server
 
-For contributors. The two plugin options arrive in the server's environment through
+For contributors. The three plugin options arrive in the server's environment through
 `.claude-plugin/plugin.json`:
 
 | Option | Env var | Used by |
 |---|---|---|
+| `openrouter_api_key` (**OpenRouter API key**) | `SIDEKICK_OPENROUTER_KEY` | OpenRouter; wins over `OPENROUTER_API_KEY` |
 | `gemini_api_key` (**Gemini API key**) | `SIDEKICK_API_KEY` | `api_key`; wins over `api_key_env` |
 | `service_account_file` (**Service-account key file**) | `SIDEKICK_SA_FILE` | `env`; wins over `GOOGLE_APPLICATION_CREDENTIALS` |
 
@@ -315,6 +348,12 @@ server treats both as unset.
 
 | Error message | Cause | Fix |
 |---|---|---|
+| `OpenRouter rejected the API key (HTTP 401)` | The OpenRouter key is wrong, revoked or pasted on the wrong row | Paste a fresh key on the **OpenRouter API key** row, then `/reload-plugins` |
+| `too few credits … (HTTP 402)` | The OpenRouter account has no credits for a paid model | Add credits at openrouter.ai/settings/credits, or use a free model |
+| `Blocked by your setting block_data_collection` | The setting is on and every provider serving that model may store or train on prompts | Pick another model, or turn the setting off ([configuration.md](configuration.md#openrouterblock_data_collection)) |
+| `privacy settings allow` | OpenRouter found no provider the account's privacy settings allow | Change them at https://openrouter.ai/settings/privacy, or pick another model |
+| `only available on agentic harnesses` | A free model refused for this client; sidekick tries the next free model once | Use a paid model, or retry later |
+| `no OpenRouter key is set` | An `author/model` id was used with no OpenRouter key | Paste the key on the **OpenRouter API key** row, then `/reload-plugins` |
 | Only `setup_status` is offered | Setup mode: config or credentials couldn't load at startup | Call `setup_status` (or read the log); it names the problem. Fix it, then restart ([how](#change-settings--reconnect)) |
 | `Config file not found … Run /sidekick:setup` | No `config.json` and no plugin key | Run `/sidekick:setup`, or paste a key on the **Gemini API key** row |
 | `Config file is not valid JSON` / `Config file could not be read` / `Config validation failed` | A broken or unreadable `config.json` | Run `/sidekick:setup` (it backs up an invalid file) or fix the file; see [configuration.md](configuration.md) |

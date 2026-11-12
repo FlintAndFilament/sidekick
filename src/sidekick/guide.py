@@ -27,6 +27,7 @@ import re
 from collections.abc import Sequence
 from typing import Optional
 
+from sidekick.backends import Surface
 from sidekick.file_tools import (
     GLOB_MAX_RESULTS,
     GREP_MAX_MATCHES,
@@ -35,6 +36,7 @@ from sidekick.file_tools import (
     READ_MAX_BYTES,
     READ_TOOL_NAMES,
 )
+from sidekick.openrouter_catalog import FREE_LIMITS
 from sidekick.sandbox import DEFAULT_DENY, WALK_SKIP_DIRS
 from sidekick.tools import (
     CAPABILITIES,
@@ -51,7 +53,7 @@ from sidekick.workspace import Workspace
 # with margin, because the cap is observed rather than documented.
 INSTRUCTIONS_BUDGET = 2000
 
-_GENERAL_TOPICS = ("tools", "files", "web", "sessions", "disk")
+_GENERAL_TOPICS = ("tools", "files", "web", "sessions", "disk", "models")
 HELP_TOPICS: tuple[str, ...] = _GENERAL_TOPICS + tuple(c.name for c in CAPABILITIES)
 
 # A custom deny-list longer than this is counted, not listed, in the instructions.
@@ -69,7 +71,22 @@ def _sentence(names: Sequence[str]) -> str:
 def _brief(summary: str) -> str:
     """A tool's first sentence without the shared lead-in: 'Ask Gemini to review X.' -> 'review X.'"""
     first = summary.split(". ", 1)[0].rstrip(".") + "."
-    return re.sub(r"^Ask Gemini (to |for )?", "", first)
+    return re.sub(r"^Ask (?:Gemini|the sidekick model) (?:to |for )?", "", first)
+
+
+def _openrouter(surface: Optional[Surface]) -> bool:
+    """True when OpenRouter is the default backend; None means Gemini, as before."""
+    return surface is not None and surface.primary == "openrouter"
+
+
+_OR_ACCESS = (
+    "Repository: the default model runs on OpenRouter and is conversation only, so paste the "
+    "code it needs."
+)
+_OR_GEMINI_ACCESS = (
+    " model=flash, flash-lite, pro or gemini-* runs on Gemini, which reads repository files itself."
+)
+_OR_WEB = "Web: none for OpenRouter models; web=true is ignored with a notice."
 
 
 def _writes_possible(workspace: Optional[Workspace]) -> bool:
@@ -95,7 +112,10 @@ def _short_deny(workspace: Workspace) -> str:
     return f"{len(deny)} configured deny patterns apply"
 
 
-def _short_access(workspace: Optional[Workspace]) -> str:
+def _short_access(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
+    if _openrouter(surface):
+        gemini = surface is not None and surface.gemini_available and _writes_possible(workspace)
+        return _OR_ACCESS + (_OR_GEMINI_ACCESS if gemini else "")
     if workspace is None:
         return "Repository: OFF. Gemini cannot read your files, so paste what it needs."
     if not workspace.tools_enabled:
@@ -117,7 +137,14 @@ def _short_access(workspace: Optional[Workspace]) -> str:
     return text
 
 
-def _short_web(workspace: Optional[Workspace], default: bool, supported: bool) -> str:
+def _short_web(
+    workspace: Optional[Workspace],
+    default: bool,
+    supported: bool,
+    surface: Optional[Surface] = None,
+) -> str:
+    if _openrouter(surface):
+        return _OR_WEB
     if not supported:
         return "Web: UNAVAILABLE on this backend; web=true is ignored with a notice."
     text = (
@@ -133,7 +160,7 @@ def _short_web(workspace: Optional[Workspace], default: bool, supported: bool) -
     return text
 
 
-def _short_params(workspace: Optional[Workspace]) -> str:
+def _short_params(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
     by_default = _sentence([c.name for c in CAPABILITIES if c.artifacts == "default"])
     opt_in = _sentence([c.name for c in CAPABILITIES if c.artifacts == "opt-in"])
     if workspace is None:
@@ -144,12 +171,17 @@ def _short_params(workspace: Optional[Workspace]) -> str:
         where = directory if rel.startswith("..") else rel + "/"
         artifact = f"write_artifact: save the answer under {where} (on by default for {by_default}"
         artifact += f"; off for {opt_in})" if opt_in else ")"
+    if _openrouter(surface):
+        model = (
+            f"- model: an OpenRouter id from {LIST_MODELS_TOOL_NAME} (prices shown), or flash / "
+            "flash-lite / pro for Gemini\n"
+        )
+    else:
+        model = f"- model: an id from {LIST_MODELS_TOOL_NAME}, or flash / flash-lite / pro\n"
     return (
         "Parameters (generating tools):\n"
         "- session_name: same name continues a conversation, new name starts fresh\n"
-        "- thinking: none, low, medium or high\n"
-        f"- model: an id from {LIST_MODELS_TOOL_NAME}, or flash / flash-lite / pro\n"
-        "- web: true/false for one call\n"
+        "- thinking: none, low, medium or high\n" + model + "- web: true/false for one call\n"
         f"- {artifact}"
     )
 
@@ -159,6 +191,8 @@ def server_instructions(
     transcript: Optional[TranscriptWriter] = None,
     web_default: bool = False,
     web_supported: bool = True,
+    *,
+    surface: Optional[Surface] = None,
 ) -> str:
     """The instructions the MCP client sees on connect, kept within INSTRUCTIONS_BUDGET (#78).
 
@@ -174,12 +208,12 @@ def server_instructions(
     tools.append(f"- {HELP_TOOL_NAME}: full detail on demand.")
     return "\n\n".join(
         [
-            "sidekick: a second opinion from Google Gemini. Each generating tool keeps "
-            "its own conversation.",
+            "sidekick: a second opinion from the model you choose (OpenRouter, or Google Gemini "
+            "directly). Each generating tool keeps its own conversation.",
             "\n".join(tools),
-            _short_access(workspace),
-            _short_web(workspace, web_default, web_supported),
-            _short_params(workspace),
+            _short_access(workspace, surface),
+            _short_web(workspace, web_default, web_supported, surface),
+            _short_params(workspace, surface),
             "Every generating call is logged to a transcript. More: "
             f"{HELP_TOOL_NAME}(topic=...) with {', '.join(_GENERAL_TOPICS)}, or a tool name.",
         ]
@@ -219,8 +253,14 @@ def _readable_but_skipped(workspace: Workspace) -> str:
     return ", ".join(names)
 
 
-def _files_topic(workspace: Optional[Workspace]) -> str:
+def _files_topic(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
     """The read/write rows, built from each tool module's declared capability (#74)."""
+    if _openrouter(surface):
+        text = _OR_ACCESS.removeprefix("Repository: ")
+        text = "Repository access: " + text[0].upper() + text[1:]
+        if surface is None or not surface.gemini_available:
+            return text
+        return text + _OR_GEMINI_ACCESS + "\n\n" + _files_topic(workspace)
     if workspace is None:
         return _NO_ACCESS.format(reason="")
     if not workspace.tools_enabled:
@@ -248,12 +288,21 @@ def _files_topic(workspace: Optional[Workspace]) -> str:
     return rows.rstrip()
 
 
-def _web_topic(workspace: Optional[Workspace], default: bool, supported: bool) -> str:
+def _web_topic(
+    workspace: Optional[Workspace],
+    default: bool,
+    supported: bool,
+    surface: Optional[Surface] = None,
+) -> str:
     """The web-access row (#76), derived from config rather than restated.
 
     The exclusion clause appears only where write_file could otherwise have been offered:
     with file tools off there is nothing to withhold, and saying so would mislead.
     """
+    if _openrouter(surface):
+        if surface is None or not surface.gemini_available:
+            return _OR_WEB
+        return _OR_WEB + "\n\nOn Gemini models:\n" + _web_topic(workspace, default, supported)
     if not supported:
         return (
             "Web access is UNAVAILABLE on this backend: the flag that lets the API's built-in "
@@ -346,21 +395,58 @@ def _tools_topic() -> str:
     return "\n".join(lines)
 
 
+_GEMINI_UNPAID = (
+    "Gemini: if a Gemini API key's Cloud project has no billing (the unpaid tier), Google may "
+    "use prompts and responses to improve its products."
+)
+
+_GEMINI_MODELS_TOPIC = (
+    "Models. flash, flash-lite, pro and gemini-* ids go to Gemini; aliases flash, flash-lite "
+    "and pro always track the newest release. With no model=, the server's Gemini default is "
+    "used; list_models shows it. OpenRouter model ids need an OpenRouter key; run "
+    "/sidekick:setup.\n\n" + _GEMINI_UNPAID
+)
+
+_MODELS_TOPIC = (
+    "Models. Routing: an author/model id (for example moonshotai/kimi-k3.1-pro) goes to "
+    "OpenRouter. flash, flash-lite, pro and gemini-* go to Gemini when it is configured, "
+    "otherwise to google/<id> on OpenRouter. With no model=, the default is "
+    "openrouter.default_model, or the live free default.\n\n"
+    "Prices come live from OpenRouter's catalog, in USD per 1M tokens (input / output), with "
+    "no markup. list_models(query=..., check=<id>) searches the catalog and checks one model.\n\n"
+    "First use of an OpenRouter model asks a question showing its price and privacy. "
+    "Accepting is remembered in openrouter.accepted_models. Privacy defaults to allow with a "
+    "warning; openrouter.block_data_collection turns that into a block. "
+    'block_data_collection sends provider.data_collection: "deny" on every OpenRouter '
+    'request. Whether "deny" also excludes providers that keep prompts only for abuse checks '
+    '("Safety Retention") is not stated by OpenRouter, so it is not guaranteed. Your account '
+    "settings page is https://openrouter.ai/settings/privacy.\n\n"
+    + FREE_LIMITS
+    + " OpenRouter screens all requests for abuse and keeps flagged content (since "
+    "2026-10-27); this happens whatever sidekick's settings are.\n\n"
+    + _GEMINI_UNPAID
+    + " block_data_collection does not apply to Gemini."
+)
+
+
 def help_text(
     workspace: Optional[Workspace],
     transcript: Optional[TranscriptWriter] = None,
     web_default: bool = False,
     web_supported: bool = True,
     topic: Optional[str] = None,
+    *,
+    surface: Optional[Surface] = None,
 ) -> str:
     """One help topic, or every topic when `topic` is None (#78)."""
     transcript_path = str(transcript.path) if transcript else "the configured transcript directory"
     sections = {
         "tools": _tools_topic(),
-        "files": _files_topic(workspace),
-        "web": _web_topic(workspace, web_default, web_supported),
+        "files": _files_topic(workspace, surface),
+        "web": _web_topic(workspace, web_default, web_supported, surface),
         "sessions": _sessions_topic(workspace),
         "disk": _disk_topic(transcript_path, workspace),
+        "models": _MODELS_TOPIC if _openrouter(surface) else _GEMINI_MODELS_TOPIC,
     }
     for cap in CAPABILITIES:
         sections[cap.name] = f"{cap.name}: {cap.summary}" + capability_hint(

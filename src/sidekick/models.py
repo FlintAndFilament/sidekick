@@ -115,6 +115,14 @@ _ALIASES: dict[str, str] = {
 _VERSIONED_ID = re.compile(r"^gemini-(\d+)(?:\.(\d+))?-(flash-lite|flash|pro)(-preview)?$")
 
 
+_GEMINI_PATH_PREFIXES = ("models/", "publishers/", "projects/", "tunedModels/")
+
+
+def is_openrouter_id(model: str) -> bool:
+    """True for an OpenRouter `<vendor>/<model>` id; Gemini resource paths are not."""
+    return "/" in model and not model.startswith(_GEMINI_PATH_PREFIXES)
+
+
 def alias_family(model: str) -> Optional[str]:
     """The family a bridge or '-latest' alias stands for, or None for a concrete model id."""
     return _ALIASES.get(model.strip().lower())

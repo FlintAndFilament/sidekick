@@ -1,8 +1,15 @@
 graph TD
-    ENV["plugin env<br/>SIDEKICK_API_KEY / SIDEKICK_SA_FILE"] -->|"plugin_option()"| CFG
+    ENV["plugin env<br/>SIDEKICK_OPENROUTER_KEY / SIDEKICK_API_KEY / SIDEKICK_SA_FILE"] -->|"plugin_option()"| CFG
     M["__main__.py"] --> CFG["load_config()<br/>config.py"]
     M --> AUTH["build_auth()<br/>auth.py"]
     M --> CL["GeminiClient(config, credentials, api_key)<br/>+ refresh_latest()<br/>client.py"]
+    M --> BK["backends.py<br/>Backend / ModelSource / Surface"]
+    M --> ROUTER["router.py Router<br/>only when an OpenRouter key is set"]
+    ROUTER --> CL
+    ROUTER --> ORC["openrouter.py OpenRouterClient"]
+    ORC --> CAT["openrouter_catalog.py<br/>live prices, privacy, free default"]
+    CL -.-> BK
+    ORC -.-> BK
     M --> ROOT["project_root()<br/>workspace.py"]
     ROOT --> TR["TranscriptWriter(dir, startup, base=root)<br/>transcript.py"]
     ROOT --> WS["build_workspace(config, root)<br/>workspace.py"]
@@ -31,7 +38,9 @@ graph TD
 
     T1 & T2 & T3 & T4 & T5 --> BASE["tools/base.py<br/>call_gemini()"]
     GUIDE --> CAPS["tools CAPABILITIES<br/>+ tools/base hints"]
+    BASE --> ROUTER
     BASE --> CL
+    BASE --> ORC
     BASE --> WEB["web_tools.py<br/>resolve_capabilities()"]
     BASE --> SRC["sources.py<br/>resolve_redirects() + sources_footer()"]
     BASE --> TR

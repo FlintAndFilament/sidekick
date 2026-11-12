@@ -5,7 +5,7 @@ MCP server construction and tool registration.
 
 Responsibilities:
   - Build the FastMCP server instance
-  - Accept pre-constructed GeminiClient, TranscriptWriter, and Workspace (injected by __main__.py)
+  - Accept a pre-constructed ModelSource, TranscriptWriter, and Workspace (injected by __main__.py)
   - Register all 8 tools by calling each tool module's register() function
   - Send the short instructions from guide.py and wire help to its full detail (#74, #78)
   - Return the configured server instance for running
@@ -13,13 +13,13 @@ Responsibilities:
 Design notes:
   - Single Responsibility: server wiring only; no config loading, no credential logic
   - Open/Closed: add a new tool by importing its register() + one function call — nothing else changes
-  - Dependency Inversion: depends on GeminiClient and TranscriptWriter abstractions, not concrete init
+  - Dependency Inversion: depends on the ModelSource and TranscriptWriter abstractions, not concrete init
 
 Raises:
   (none) — startup errors surface from __main__.py where they are caught and reported
 
 Used by:  __main__.py -> build_server()
-Imports:  client.py (GeminiClient), guide.py, transcript.py (TranscriptWriter),
+Imports:  backends.py (ModelSource), guide.py, transcript.py (TranscriptWriter),
           tools/__init__.py, workspace.py (Workspace)
 """
 
@@ -27,7 +27,7 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.guide import HELP_TOPICS, help_text, server_instructions
 from sidekick.tools import (
     register_architect,
@@ -48,7 +48,7 @@ _SERVER_NAME = "sidekick"
 
 
 def build_server(
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> FastMCP:
@@ -58,7 +58,7 @@ def build_server(
     mcp = FastMCP(
         _SERVER_NAME,
         instructions=server_instructions(
-            workspace, transcript, client.web_default, client.web_supported
+            workspace, transcript, client.web_default, client.web_supported, surface=client.surface
         ),
     )
     register_ask(mcp, client, transcript, workspace)
@@ -71,7 +71,12 @@ def build_server(
     register_help(
         mcp,
         lambda topic: help_text(
-            workspace, transcript, client.web_default, client.web_supported, topic=topic
+            workspace,
+            transcript,
+            client.web_default,
+            client.web_supported,
+            topic=topic,
+            surface=client.surface,
         ),
         HELP_TOPICS,
     )
@@ -91,7 +96,7 @@ def setup_needed_text(problem: str) -> str:
             + "\n… (truncated; the full message is in ~/.config/sidekick/logs/)"
         )
     return (
-        "sidekick is installed but not set up yet, so its Gemini tools are unavailable.\n\n"
+        "sidekick is installed but not set up yet, so its tools are unavailable.\n\n"
         f"Problem:\n{problem}\n\n"
         "Tell the user this in one or two lines and offer to run /sidekick:setup. After they fix "
         "it, they run /reload-plugins (or /mcp → plugin:sidekick:mcp → Reconnect)."
@@ -108,7 +113,7 @@ def build_setup_server(problem: str) -> FastMCP:
 
     @mcp.tool(
         name="setup_status",
-        description="Why sidekick's Gemini tools are unavailable and how to fix it.",
+        description="Why sidekick's tools are unavailable and how to fix it.",
     )
     def setup_status() -> str:
         return text

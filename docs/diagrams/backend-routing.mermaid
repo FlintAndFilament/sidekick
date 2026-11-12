@@ -1,0 +1,12 @@
+flowchart TD
+    A["Tool call"] --> K{"OpenRouter key set?"}
+    K -->|no| G0["GeminiClient: today's behaviour<br/>author/model ids refused with a fix"]
+    K -->|yes| M{"model="}
+    M -->|omitted| OR["OpenRouter<br/>openrouter.default_model or live free default"]
+    M -->|"author/model"| OR
+    M -->|"flash / flash-lite / pro / gemini-*"| GQ{"Gemini configured?"}
+    GQ -->|yes| GM["Gemini<br/>file + web tools as configured"]
+    GQ -->|no| ORG["OpenRouter as google/&lt;id&gt;"]
+    OR --> PF["preflight: price + privacy question on first use"]
+    ORG --> PF
+    PF --> ASK["chat: conversation only"]

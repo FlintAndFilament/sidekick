@@ -6,7 +6,7 @@ Shared type definitions and helper for all MCP tools.
 Responsibilities:
   - Define ToolResult type alias (return type for all tool handlers)
   - Define ThinkingParam type alias (optional thinking level parameter)
-  - Provide call_gemini() helper that combines ask() + transcript append
+  - Provide call_gemini() helper: route to a backend, preflight, ask(), transcript append
   - Give Gemini the file tools matching the calling tool's capability row (read / read+write)
   - Describe that capability row back to the MCP client (capability_hint, tool_annotations)
   - Save the final answer as an artifact when the calling tool asks for one
@@ -20,7 +20,7 @@ Raises:
   (none directly) — call_gemini() surfaces ClientError messages as ToolResult strings
 
 Used by:  tools/ask.py, tools/brainstorm.py, tools/review.py, tools/debug.py, tools/architect.py
-Imports:  client.py (GeminiClient), transcript.py (TranscriptWriter), config.py (ThinkingLevel),
+Imports:  backends.py (ModelSource, Elicit), client.py (Session), transcript.py (TranscriptWriter), config.py (ThinkingLevel),
           workspace.py (Workspace), tool_loop.py (ToolCallRecord)
 """
 
@@ -28,13 +28,15 @@ import logging
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from mcp.types import ToolAnnotations
+from mcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+from mcp.server.fastmcp import Context
+from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
+from pydantic import BaseModel, Field
 
-from sidekick import models
+from sidekick.backends import Backend, Elicit, ElicitOutcome, ModelSource
 from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
-    GeminiClient,
     Session,
     _is_retryable,
 )
@@ -48,6 +50,36 @@ from sidekick.tool_loop import ToolCallRecord
 from sidekick.transcript import TranscriptWriter
 from sidekick.web_tools import WEB_TOOL_NAMES, Capabilities, resolve_capabilities
 from sidekick.workspace import Workspace
+
+
+class _AcceptForm(BaseModel):
+    accept: bool = Field(default=True, description="Use this model")
+
+
+def elicitor(ctx: Context) -> Elicit:  # type: ignore[type-arg]
+    """An Elicit that asks the user through MCP elicitation; "unavailable" when it cannot."""
+
+    async def elicit(message: str) -> ElicitOutcome:
+        try:
+            session = ctx.request_context.session
+        except ValueError:
+            return "unavailable"
+        try:
+            caps = ClientCapabilities(elicitation=ElicitationCapability())
+            if not session.check_client_capability(caps):
+                return "unavailable"
+            result = await ctx.elicit(message, _AcceptForm)
+        except Exception as exc:
+            _log.warning("elicitation unavailable (%s)", type(exc).__name__)
+            return "unavailable"
+        if isinstance(result, AcceptedElicitation):
+            return "accept" if result.data.accept else "decline"
+        if isinstance(result, DeclinedElicitation):
+            return "decline"
+        return "cancel"
+
+    return elicit
+
 
 # Return type for all MCP tool handlers.
 ToolResult = str
@@ -128,6 +160,11 @@ _ARTIFACT_CLAUSE: dict[ArtifactMode, str] = {
 }
 
 
+_OPENROUTER_WEB = (
+    "\n\nWeb access: none for OpenRouter models; web=true is ignored and the reply says so."
+)
+
+
 def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str:
     """The web row for a tool description (#76).
 
@@ -157,6 +194,30 @@ def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str
     return note
 
 
+def _openrouter_hint(
+    workspace: Optional[Workspace],
+    write: bool,
+    artifacts: ArtifactMode,
+    gemini_available: bool,
+    disk: str,
+) -> str:
+    """The capability row when the default model runs on OpenRouter: conversation only."""
+    hint = (
+        "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
+        "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
+        "nothing else. Include the code or context you want considered directly in this call."
+    )
+    if gemini_available and workspace is not None and workspace.tools_enabled:
+        hint += (
+            " Passing model=flash, flash-lite, pro or a gemini-* id runs the call on Gemini "
+            "instead, which reads this repository itself"
+        )
+        if write:
+            hint += f" and may create or overwrite files there with {WRITE_TOOL_NAME}"
+        hint += "."
+    return hint + disk + _ARTIFACT_CLAUSE[artifacts] + _OPENROUTER_WEB
+
+
 def capability_hint(
     workspace: Optional[Workspace],
     *,
@@ -164,6 +225,8 @@ def capability_hint(
     artifacts: ArtifactMode = "never",
     web_default: bool = False,
     web_supported: bool = True,
+    default_backend: Literal["gemini", "openrouter"] = "gemini",
+    gemini_available: bool = False,
 ) -> str:
     """Client-facing sentence describing what this tool can read and what it writes (#74).
 
@@ -175,6 +238,8 @@ def capability_hint(
     tools are switched off, so the hint never claims the call leaves the tree untouched.
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
+    if default_backend == "openrouter":
+        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk)
     # Only claim write_file is withheld where it would otherwise have been offered:
     # with file tools off, it does not exist and mentioning it would mislead.
     web_note = _web_note(
@@ -232,7 +297,7 @@ def tool_annotations(workspace: Optional[Workspace], *, write: bool) -> ToolAnno
 # it cannot drift per tool again — ask's copy had said "v1: always 'default'" long
 # after session names started working.
 _SESSION_BASE = (
-    "Named conversation to continue. Calls that share a name continue one Gemini conversation; "
+    "Named conversation to continue. Calls that share a name continue one conversation; "
     "a new name starts fresh. Sessions are separate per tool and per model, live in memory "
     f"until the server restarts, and the least recently used is dropped past {MAX_SESSIONS}."
 )
@@ -254,20 +319,47 @@ def session_param_hint(workspace: Optional[Workspace], *, write: bool) -> str:
     return _SESSION_BASE
 
 
-def model_param_hint(client: GeminiClient) -> str:
+def model_param_hint(client: ModelSource) -> str:
     """Backend-aware description for the `model` param, computed once at tool registration.
 
-    api_key mode surfaces the Developer-API shortlist (incl. '-latest' aliases); Vertex
-    modes surface the alias-free Vertex shortlist. Injected into each tool's Annotated[...]
-    so the hint can never contradict the active backend.
+    Injected into each tool's Annotated[...] so the hint can never contradict the active
+    backend; the client owns the wording.
     """
-    return models.schema_hint(
-        models.backend_for(client.auth_method), client.default_model, client.resolved_latest
-    )
+    return client.model_hint()
+
+
+# Re-checks allowed when concurrent calls keep re-pointing a shared default session.
+_MAX_PREFLIGHTS = 8
+_UNSTABLE_DEFAULT = (
+    "[sidekick error] The default model kept changing while sidekick was checking it (other "
+    "calls were rotating free models), so nothing was sent. Retry, or pass model= to pick one."
+)
+
+
+async def _preflight_until_stable(
+    backend: Backend, session: Session, model: str, elicit: Optional[Elicit]
+) -> tuple[Optional[str], str, list[str]]:
+    """Preflight the model `session` will actually send to: (refusal or None, model, notices).
+
+    A preflight can await a probe or the user, and meanwhile a concurrent call may re-point a
+    shared default session to another model (the free default rotated). Each new model gets
+    its own check, so nothing goes to a model that was never checked. Raises ClientError.
+    """
+    notices: list[str] = []
+    for _ in range(_MAX_PREFLIGHTS):
+        pre = await backend.preflight(model, elicit)
+        if not pre.proceed:
+            return pre.message, model, notices
+        if pre.notice:
+            notices.append(pre.notice)
+        if session.model == model:
+            return None, model, notices
+        model = session.model
+    return _UNSTABLE_DEFAULT, model, notices
 
 
 async def call_gemini(
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     tool_name: str,
     session_name: str,
@@ -279,43 +371,57 @@ async def call_gemini(
     write: bool = False,
     artifact_topic: Optional[str] = None,
     web: Optional[bool] = None,
+    elicit: Optional[Elicit] = None,
 ) -> ToolResult:
-    """Get a session, call ask(), log to transcript, return response or error string.
+    """Pick the backend, get a session, call ask(), log to transcript, return the reply.
 
-    With a workspace, Gemini gets the read file tools (plus write_file when `write`) unless the
-    file_tools kill switch is off. Every tool call is recorded in the transcript — including
-    calls made before a failure. With `artifact_topic` (and a workspace), the final answer is
-    saved as an artifact and its path appended to the reply; a failed save adds a notice but
-    never loses the answer.
+    `client.backend_for(model)` picks the backend (Gemini or OpenRouter). With a workspace and a
+    backend that supports files, the model gets the read file tools (plus write_file when
+    `write`) unless the file_tools kill switch is off; OpenRouter models are conversation only,
+    and a per-call OpenRouter model is told apart by a notice. Every tool call is recorded in
+    the transcript — including calls made before a failure. With `artifact_topic` (and a
+    workspace), the final answer is saved as an artifact and its path appended to the reply; a
+    failed save adds a notice but never loses the answer.
 
-    `web` attaches Gemini's server-side search and URL fetch (#76). None follows the
-    configured default. Web access and write_file are mutually exclusive within a call:
+    `web` attaches Gemini's server-side search and URL fetch (#76). None follows the chosen
+    backend's default. Web access and write_file are mutually exclusive within a call:
     resolve_capabilities() applies that rule once, here, and the result drives both the
-    registry handed to Gemini and the preamble it is told.
+    registry handed to the model and the preamble it is told.
 
-    If the requested model returns a terminal overload error (503/429 after retries),
-    automatically retries once against the fallback model (newest Flash-Lite) and prefixes the response with a
-    visible notice so Claude and the user know a substitution occurred.
+    Before anything is sent, the backend's preflight may ask the user (through `elicit`) to
+    accept a model's price and privacy; a refusal returns its message with no transcript entry.
+
+    If the requested model fails in a way the backend can fall back from (503/429 after
+    retries; on OpenRouter, a free model that is limited or gated), the call is retried once on
+    the backend's fallback model and the reply is prefixed with a visible notice.
     """
-    effective_thinking: ThinkingLevel = thinking or client.default_thinking
+    try:
+        backend = client.backend_for(model)
+    except ClientError as exc:
+        return f"[sidekick error] {exc}"
+
+    effective_thinking: ThinkingLevel = thinking or backend.default_thinking
     _log.debug(
-        "%s session=%r model=%s thinking=%s",
+        "%s session=%r model=%s backend=%s thinking=%s",
         tool_name,
         session_name,
         model or "default",
+        backend.name,
         effective_thinking,
     )
 
     caps: Capabilities = resolve_capabilities(
-        write=write, requested=web, default=client.web_default
+        write=write, requested=web, default=backend.web_default
     )
-    web_refused = caps.web and not client.web_supported
+    web_refused = caps.web and not backend.web_supported
     if web_refused:
-        # Vertex cannot carry the server-side flag. Drop web rather than fail the call, and
-        # restore write — the exclusion only existed because web content was in play.
-        _log.warning("web access requested but unsupported on %s", client.auth_method)
+        # Vertex and OpenRouter cannot carry the server-side tools. Drop web rather than fail
+        # the call, and restore write — the exclusion only existed because web was in play.
+        _log.warning("web access requested but unsupported on %s", backend.label)
         caps = Capabilities(web=False, write=write)
-    registry = workspace.registry(write=caps.write) if workspace else None
+    registry = (
+        workspace.registry(write=caps.write) if workspace and backend.supports_files else None
+    )
     saving = workspace is not None and artifact_topic is not None
     if registry:
         system_instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
@@ -325,7 +431,31 @@ async def call_gemini(
         system_instruction += _WEB_PREAMBLE
     records: list[ToolCallRecord] = []
 
-    session = client.get_or_create_session(name=f"{tool_name}:{session_name}", model=model)
+    session = backend.get_or_create_session(name=f"{tool_name}:{session_name}", model=model)
+    requested_model = backend.resolve_model(model)
+    fallback_model = backend.fallback_for(requested_model)
+    files_notice = (
+        f"[sidekick notice] `{requested_model}` runs on OpenRouter and could not read "
+        "repository files: it saw only this prompt and the session's earlier turns.\n\n"
+        if model is not None
+        and workspace is not None
+        and workspace.tools_enabled
+        and not backend.supports_files
+        else ""
+    )
+
+    try:
+        refusal, checked, notices = await _preflight_until_stable(
+            backend, session, requested_model, elicit
+        )
+    except ClientError as exc:
+        _log.error("%s session=%r preflight failed: %s", tool_name, session_name, exc)
+        return f"[sidekick error] {exc}"
+    if refusal is not None:
+        return refusal
+    if checked != requested_model:
+        requested_model, fallback_model = checked, backend.fallback_for(checked)
+    # No await from here until backend.ask() reads session.model, so it sends to `checked`.
 
     async def _do_ask(use_model: Optional[str] = None) -> str:
         # The fallback answer belongs to the conversation the caller named (#122). Run it on a
@@ -335,7 +465,7 @@ async def call_gemini(
             session
             if use_model is None
             else Session(
-                model=client.resolve_model(use_model),
+                model=backend.resolve_model(use_model),
                 history=list(session.history),
                 name=session.name,
             )
@@ -343,7 +473,7 @@ async def call_gemini(
         # Turns the stand-in starts with; anything past this index is this call's new turn,
         # even if a concurrent call on the same session commits while the fallback runs.
         base = len(target.history)
-        answer = await client.ask(
+        answer = await backend.ask(
             target,
             prompt,
             thinking,
@@ -377,21 +507,21 @@ async def call_gemini(
                 session=session_name,
                 tool_calls=_tool_lines(),
             )
-        return message
+        # Preflight notices are shown once (the backend has already marked them shown), so a
+        # failed call must still carry them.
+        return "".join(notices) + message
 
     fallback_notice: Optional[str] = None
-    requested_model = client.resolve_model(model)
-    fallback_model = client.fallback_model
     answered_by = requested_model
     try:
         response = await _do_ask()
     except ClientError as exc:
-        # If retryable and the model we tried is not already the fallback, retry once on it.
-        # `model or client.default_model` reflects the model actually used — when the caller
-        # omits `model`, the effective default (not the fallback) was tried, so fallback applies.
+        # Retry once on the backend's fallback model when the failure allows it; None means
+        # there is none (already on it, a paid OpenRouter model, or no free model left).
         requested = requested_model
         wrote = any(r.name == "write_file" and r.ok for r in records)
-        if _is_retryable(exc) and requested != fallback_model and wrote:
+        can_fall_back = backend.can_fall_back(exc) and fallback_model is not None
+        if can_fall_back and wrote:
             # Replaying the loop on another model would repeat writes that already happened.
             _log.error(
                 "%s: %r overloaded after writing files — not falling back", tool_name, requested
@@ -400,19 +530,28 @@ async def call_gemini(
                 f"[sidekick error] {exc} (not retried on {fallback_model}: files were "
                 "already written this call — see the transcript)"
             )
-        if _is_retryable(exc) and requested != fallback_model:
+        if can_fall_back:
+            assert fallback_model is not None
             _log.warning(
-                "%s: model %r overloaded — falling back to %r",
+                "%s: model %r unavailable — falling back to %r",
                 tool_name,
                 requested,
                 fallback_model,
             )
-            fallback_at = len(records)
             try:
+                pre_fb = await backend.preflight(fallback_model, elicit)
+                if not pre_fb.proceed:
+                    return _log_failure(
+                        f"[sidekick error] {exc} (fallback {fallback_model} not used: "
+                        f"{pre_fb.message})"
+                    )
+                notices.append(pre_fb.notice)
+                fallback_at = len(records)
                 response = await _do_ask(fallback_model)
                 answered_by = fallback_model
+                reason = "503/429" if _is_retryable(exc) else "gated by OpenRouter"
                 fallback_notice = (
-                    f"[sidekick notice] Model '{requested}' was unavailable (503/429); "
+                    f"[sidekick notice] Model '{requested}' was unavailable ({reason}); "
                     f"this response was generated by fallback model '{fallback_model}'.\n\n"
                 )
             except ClientError as fallback_exc:
@@ -451,11 +590,10 @@ async def call_gemini(
         except OSError as exc:
             _log.error("%s: artifact not saved: %s", tool_name, exc)
             response += f"\n\n[sidekick notice] artifact not saved: {exc}"
-    if web_refused:
-        response = (
-            "[sidekick notice] Web access was requested but is unavailable on the "
-            f"{client.auth_method} backend, so this answer is not web-grounded.\n\n{response}"
-        )
-    if fallback_notice:
-        return f"{fallback_notice}{response}"
-    return response
+    web_notice = (
+        "[sidekick notice] Web access was requested but is unavailable on the "
+        f"{backend.label} backend, so this answer is not web-grounded.\n\n"
+        if web_refused
+        else ""
+    )
+    return (fallback_notice or "") + "".join(notices) + files_notice + web_notice + response

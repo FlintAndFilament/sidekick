@@ -5,6 +5,7 @@ MCP tool: list_models — the authoritative, live, backend-scoped model list.
 
 Responsibilities:
   - Register the list_models MCP tool
+  - Render the OpenRouter section (featured, query=, check=) beside the Gemini one
   - Fetch the live catalog via GeminiClient.list_models(), filter to chat-capable models
   - Render a compact table (id, label, (default)/(alias) markers) headed by the active backend
   - Degrade gracefully to the curated static shortlist when the live list is unavailable
@@ -20,6 +21,7 @@ Imports:  models.py (filter + shortlist), client.py (GeminiClient, ClientError),
           tools/base.py (ToolResult), transcript.py (TranscriptWriter, signature parity)
 """
 
+import asyncio
 from typing import Annotated, Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -27,7 +29,20 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from sidekick import models
+from sidekick.backends import ModelSource
 from sidekick.client import ClientError, GeminiClient
+from sidekick.openrouter import OpenRouterClient
+from sidekick.openrouter_catalog import (
+    FREE_LIMITS,
+    PINNED_FREE_MODEL,
+    ORModel,
+    PrivacyStatus,
+    featured,
+    format_rows,
+    free_candidates,
+    privacy_sentence,
+    search,
+)
 from sidekick.tools.base import ToolResult
 from sidekick.transcript import TranscriptWriter
 
@@ -65,6 +80,7 @@ def format_model_list(
     backend: str,
     default_model: str,
     latest: Optional[dict[str, str]] = None,
+    omit_hint: Optional[str] = None,
 ) -> str:
     """Render the live catalog: chat-capable only, default first, then alphabetical by id."""
     ids_seen: set[str] = set()
@@ -81,7 +97,10 @@ def format_model_list(
 
     if not rows:
         return format_static_fallback(
-            backend, default_model, "the live list returned no chat-capable models"
+            backend,
+            default_model,
+            "the live list returned no chat-capable models",
+            omit_hint,
         )
 
     rows.sort(key=lambda r: (r[0] != default_model, r[0]))  # default first, then alphabetical
@@ -96,13 +115,21 @@ def format_model_list(
         )
     lines += [
         "",
-        f"Pass model='<id>' to any tool. Omit to use the default ({default_model}).",
+        _pass_line(default_model, omit_hint),
         "Or pass flash / flash-lite / pro to get the newest release of that family.",
     ]
     return "\n".join(lines)
 
 
-def format_static_fallback(backend: str, default_model: str, reason: str) -> str:
+def _pass_line(default_model: str, omit_hint: Optional[str]) -> str:
+    """The model= footer; under a Router the omitted-model default is OpenRouter's, not Gemini's."""
+    omit = omit_hint or f"Omit to use the default ({default_model})."
+    return f"Pass model='<id>' to any tool. {omit}"
+
+
+def format_static_fallback(
+    backend: str, default_model: str, reason: str, omit_hint: Optional[str] = None
+) -> str:
     """Render the curated static shortlist when the live catalog is unavailable."""
     backend_label = _BACKEND_LABEL.get(backend, backend)
     rows = models.shortlist(backend)
@@ -116,61 +143,168 @@ def format_static_fallback(backend: str, default_model: str, reason: str) -> str
     ]
     for model_id, label in rows:
         lines.append(f"  {model_id.ljust(width)}{_markers(model_id, default_model)}  — {label}")
-    lines += [
-        "",
-        f"Pass model='<id>' to any tool. Omit to use the default ({default_model}).",
-    ]
+    lines += ["", _pass_line(default_model, omit_hint)]
     return "\n".join(lines)
 
 
-def render_model_list(client: GeminiClient, backend: str) -> str:
+def render_model_list(client: GeminiClient, backend: str, omit_hint: Optional[str] = None) -> str:
     """Fetch + render the live list, degrading to the static shortlist on any ClientError."""
     try:
         raw = client.list_models()
     except ClientError as exc:
-        return format_static_fallback(backend, client.default_model, str(exc))
-    return format_model_list(raw, backend, client.default_model, client.resolved_latest)
+        return format_static_fallback(backend, client.default_model, str(exc), omit_hint)
+    return format_model_list(raw, backend, client.default_model, client.resolved_latest, omit_hint)
 
 
-def register(mcp: FastMCP, client: GeminiClient, transcript: TranscriptWriter) -> None:
+_FEATURED_HEADER = "OpenRouter models (USD per 1M tokens, input / output, from the live catalog):"
+_QUERY_CAP = 40
+_OR_ONLY_NOTICE = (
+    "[sidekick notice] query= and check= apply to OpenRouter models only; "
+    "no OpenRouter key is set.\n\n"
+)
+
+
+def _free_default(client: OpenRouterClient) -> str:
+    free = free_candidates(client.catalog)
+    return free[0] if free else PINNED_FREE_MODEL
+
+
+def _privacy_map(client: OpenRouterClient, rows: list[ORModel]) -> dict[str, PrivacyStatus]:
+    known = ((m.id, client.cached_privacy(m.id)) for m in rows)
+    return {model_id: status for model_id, status in known if status is not None}
+
+
+def _rows(client: OpenRouterClient, rows: list[ORModel]) -> list[str]:
+    return format_rows(
+        rows,
+        default_model=client.default_model,
+        free_default=_free_default(client),
+        privacy=_privacy_map(client, rows),
+    )
+
+
+async def render_openrouter(
+    client: OpenRouterClient, *, query: Optional[str], check: Optional[str]
+) -> str:
+    """The OpenRouter section: a check of one model, a search, or the featured list."""
+    if not client.catalog_loaded:
+        return (
+            "[sidekick notice] OpenRouter's catalog is unavailable right now, so prices are "
+            f"unknown. Default model: {client.default_model}."
+        )
+    if check:
+        found = client.entry(check)
+        if found is None:
+            return (
+                f"[sidekick notice] `{check}` is not in OpenRouter's catalog. "
+                "Check the id, or search with query=."
+            )
+        try:
+            status = await client.privacy_status(check)
+        except ClientError as exc:
+            return f"[sidekick error] {exc}"
+        row = _rows(client, [found])[0]
+        text = row + "\n" + privacy_sentence(check, status, block=client.block_data_collection)
+        return text + " " + FREE_LIMITS if found.free else text
+    if query:
+        hits = search(client.catalog, query)
+        if not hits:
+            return f"No OpenRouter text model matches {query!r}."
+        lines = _rows(client, hits[:_QUERY_CAP])
+        if len(hits) > _QUERY_CAP:
+            lines.append(f"…and {len(hits) - _QUERY_CAP} more; narrow the query.")
+        return "\n".join([_FEATURED_HEADER, "", *lines])
+    shown = featured(client.catalog, client.default_model, free_candidates(client.catalog))
+    more = sum(1 for m in client.catalog if m.text_chat) - len(shown)
+    lines = [_FEATURED_HEADER, "", *_rows(client, shown), ""]
+    lines.append(
+        f"{more} more text models: pass query='…' to search ids and names, or check='<id>' "
+        "for one model's price and privacy status (sends one tiny routing check)."
+    )
+    return "\n".join(lines)
+
+
+_NO_GEMINI = "[sidekick notice] No Gemini backend is configured on this server."
+
+
+def register(mcp: FastMCP, client: ModelSource, transcript: TranscriptWriter) -> None:
     """Register list_models with the MCP server.
 
-    `transcript` is accepted for registration-signature parity with the other tools but is
-    unused — this is a metadata call, not an inference, so it is not logged to transcripts.
+    Lists each backend's models, primary first (OpenRouter, then Gemini). `transcript` is
+    accepted for registration-signature parity with the other tools but is unused — this is a
+    metadata call, not an inference, so it is not logged to transcripts.
     """
-    backend = models.backend_for(client.auth_method)
+    backends = list(client.backends())
+    gemini = next((b for b in backends if isinstance(b, GeminiClient)), None)
+    openrouter = next((b for b in backends if isinstance(b, OpenRouterClient)), None)
+    backend = models.backend_for(gemini.auth_method) if gemini is not None else ""
+    omit_hint = (
+        f"Omit model to use the OpenRouter default ({client.default_model})."
+        if openrouter is not None
+        else None
+    )
     cache: dict[str, str] = {}
 
-    @mcp.tool(
-        # The one tool that writes nothing at all: no transcript entry, no artifact, no file
-        # access. Absent annotations make clients assume the opposite, so state it (#74).
-        annotations=ToolAnnotations(
-            readOnlyHint=True,
-            destructiveHint=False,
-            idempotentHint=True,
-            openWorldHint=True,  # it queries the live backend
-        )
-    )
-    def list_models(
-        refresh: Annotated[
-            bool,
-            Field(
-                description="Re-fetch the live list, bypassing the per-process cache. "
-                "Default False reuses the first successful fetch."
-            ),
-        ] = False,
-    ) -> ToolResult:
-        """List the Gemini models available on this bridge's active backend.
-
-        Returns a chat-only, backend-scoped catalog (image/tts/audio/embedding/live models are
-        excluded), marking the server default and any '-latest' aliases. Use this to discover
-        valid values for the `model=` parameter accepted by every sidekick tool. Falls back to
-        a curated shortlist if the live catalog cannot be fetched.
-        """
+    def gemini_section(refresh: bool) -> str:
+        assert gemini is not None
         if refresh or "text" not in cache:
-            text = render_model_list(client, backend)
+            text = render_model_list(gemini, backend, omit_hint)
             # Only cache authoritative live results; a degraded fallback should retry next call.
             if not text.startswith("[sidekick notice]"):
                 cache["text"] = text
             return text
         return cache["text"]
+
+    @mcp.tool(
+        # Reads and writes no files and keeps no transcript, but `check` sends one tiny routing
+        # probe to OpenRouter, so repeating a call is not free of effects: not idempotent (#74).
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,  # it queries the live backend
+        )
+    )
+    async def list_models(
+        refresh: Annotated[
+            bool,
+            Field(
+                description="Re-fetch the live lists, bypassing the per-process Gemini cache and "
+                "reloading the OpenRouter catalog. Default False reuses the first successful "
+                "Gemini fetch."
+            ),
+        ] = False,
+        query: Annotated[
+            Optional[str],
+            Field(
+                description="OpenRouter only: search model ids and names (case-insensitive) "
+                "and list matches with prices."
+            ),
+        ] = None,
+        check: Annotated[
+            Optional[str],
+            Field(
+                description="OpenRouter only: one model id to show its price and privacy status. "
+                "Sends one tiny routing check."
+            ),
+        ] = None,
+    ) -> ToolResult:
+        """List the models this server can use, with live prices for OpenRouter.
+
+        With no arguments: the setup picks and free models; query= searches OpenRouter ids and
+        names; check=<id> shows one model's price and privacy status. Gemini models are listed
+        when Gemini is configured. Use this to find values for the model= parameter.
+        """
+        sections: list[str] = []
+        if openrouter is not None:
+            if refresh:
+                await asyncio.to_thread(openrouter.refresh_catalog)
+            sections.append(await render_openrouter(openrouter, query=query, check=check))
+        if gemini is not None:
+            sections.append(gemini_section(refresh))
+        if not sections:
+            return _NO_GEMINI
+        text = "\n\n".join(sections)
+        if openrouter is None and (query or check):
+            text = _OR_ONLY_NOTICE + text
+        return text

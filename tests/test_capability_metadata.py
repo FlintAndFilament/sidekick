@@ -140,7 +140,7 @@ class TestRegisteredDescriptions:
     def test_original_purpose_text_survives(self, tmp_path: Path, tool: str) -> None:
         """The capability sentence is appended — it must not replace what the tool is for."""
         described = _tools(_server(tmp_path, _workspace(tmp_path)))[tool].description or ""
-        assert described.startswith("Ask Gemini")
+        assert described.startswith("Ask the sidekick model")
 
     @pytest.mark.parametrize("tool", GENERATING_TOOLS)
     def test_disabled_state_is_advertised(self, tmp_path: Path, tool: str) -> None:

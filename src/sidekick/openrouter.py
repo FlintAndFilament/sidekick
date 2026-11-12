@@ -30,22 +30,33 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import httpx
 
-from sidekick.backends import Session
+from sidekick.backends import Elicit, Preflight, Session
 from sidekick.client import _MAX_RETRIES, _PINNED_BY_FAMILY, _RETRY_BASE_DELAY, MAX_SESSIONS
-from sidekick.config import CONFIG_PATH, Config, ThinkingLevel
+from sidekick.config import (
+    CONFIG_PATH,
+    Config,
+    ConfigError,
+    ThinkingLevel,
+    remember_accepted_model,
+)
 from sidekick.errors import ClientError
 from sidekick.openrouter_catalog import (
     OPENROUTER_BASE_URL,
     PINNED_FREE_MODEL,
     ORModel,
     PrivacyStatus,
+    acceptance_question,
     account_policy_message,
     blocked_message,
+    declined_message,
+    dismissed_message,
+    first_use_notice,
     free_candidates,
     is_free,
     map_effort,
     parse_catalog,
     resolve_gemini_alias,
+    unattended_refused_message,
 )
 
 if TYPE_CHECKING:
@@ -151,6 +162,8 @@ class OpenRouterClient:
         self._sessions: OrderedDict[str, Session] = OrderedDict()
         self._privacy: dict[str, tuple[PrivacyStatus, Optional[float]]] = {}
         self._deny_models: set[str] = set()
+        self._accepted: set[str] = set(config.openrouter.accepted_models)
+        self._notified: set[str] = set()
         self._gated: set[str] = set()
         self._cooling: dict[str, float] = {}
 
@@ -263,6 +276,45 @@ class OpenRouterClient:
         expires = self._clock() + FREE_COOLDOWN_SECONDS if status is PrivacyStatus.UNKNOWN else None
         self._privacy[model] = (status, expires)
         return status
+
+    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight:
+        """First-use price and privacy check for `model`; 401/402 from the probe propagate."""
+        if model in self._accepted or model in self._notified:
+            return Preflight(True)
+        status = await self.privacy_status(model)
+        block = self._config.openrouter.block_data_collection
+        if block and status is PrivacyStatus.ALL_MAY_COLLECT:
+            return Preflight(
+                False, message=f"[sidekick] {blocked_message(model)} Nothing was sent."
+            )
+        entry = self.entry(model)
+        outcome = (
+            await elicit(acceptance_question(model, entry, status, block=block))
+            if elicit
+            else "unavailable"
+        )
+        if outcome == "accept":
+            self._accepted.add(model)
+            try:
+                remember_accepted_model(model, self._config_path)
+            except (ConfigError, OSError) as exc:
+                _log.warning(
+                    "accepted %s for this session only; config not updated (%s)",
+                    model,
+                    type(exc).__name__,
+                )
+            return Preflight(True)
+        if outcome == "decline":
+            return Preflight(False, message=declined_message(model))
+        if outcome == "cancel":
+            return Preflight(False, message=dismissed_message(model))
+        if status is not PrivacyStatus.SOME_MAY_COLLECT:
+            return Preflight(False, message=unattended_refused_message(model, status))
+        self._notified.add(model)
+        self._deny_models.add(model)  # unattended: privacy-only routing for this model
+        return Preflight(
+            True, notice=first_use_notice(model, entry, status, block=block, forced_deny=True)
+        )
 
     def resolve_model(self, model: Optional[str]) -> str:
         if model is None:

@@ -149,3 +149,13 @@ def test_resolve_gemini_alias():
     assert oc.resolve_gemini_alias("flash-lite", cat, PINNED) == "google/gemini-3.5-flash-lite"
     assert oc.resolve_gemini_alias("pro", cat, PINNED) == "google/gemini-3.1-pro-preview"  # pinned
     assert oc.resolve_gemini_alias("gemini-3.5-flash", cat, PINNED) == "google/gemini-3.5-flash"
+
+
+def test_first_use_notice_forced_deny_suffix_only_when_forced():
+    from sidekick.openrouter_catalog import PrivacyStatus, first_use_notice
+
+    args = ("x-ai/grok-4.7", None, PrivacyStatus.SOME_MAY_COLLECT)
+    assert "privacy-only routing" not in first_use_notice(*args, block=False)
+    assert "privacy-only routing" not in first_use_notice(*args, block=False, forced_deny=False)
+    forced = first_use_notice(*args, block=False, forced_deny=True)
+    assert "privacy-only routing" in forced and "may route this call" not in forced

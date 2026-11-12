@@ -28,9 +28,12 @@ import logging
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from mcp.types import ToolAnnotations
+from mcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+from mcp.server.fastmcp import Context
+from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
+from pydantic import BaseModel, Field
 
-from sidekick.backends import ModelSource
+from sidekick.backends import Elicit, ElicitOutcome, ModelSource
 from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
@@ -48,6 +51,36 @@ from sidekick.tool_loop import ToolCallRecord
 from sidekick.transcript import TranscriptWriter
 from sidekick.web_tools import WEB_TOOL_NAMES, Capabilities, resolve_capabilities
 from sidekick.workspace import Workspace
+
+
+class _AcceptForm(BaseModel):
+    accept: bool = Field(default=True, description="Use this model")
+
+
+def elicitor(ctx: Context) -> Elicit:  # type: ignore[type-arg]
+    """An Elicit that asks the user through MCP elicitation; "unavailable" when it cannot."""
+
+    async def elicit(message: str) -> ElicitOutcome:
+        try:
+            session = ctx.request_context.session
+        except ValueError:
+            return "unavailable"
+        try:
+            caps = ClientCapabilities(elicitation=ElicitationCapability())
+            if not session.check_client_capability(caps):
+                return "unavailable"
+            result = await ctx.elicit(message, _AcceptForm)
+        except Exception as exc:
+            _log.warning("elicitation unavailable (%s)", type(exc).__name__)
+            return "unavailable"
+        if isinstance(result, AcceptedElicitation):
+            return "accept" if result.data.accept else "decline"
+        if isinstance(result, DeclinedElicitation):
+            return "decline"
+        return "cancel"
+
+    return elicit
+
 
 # Return type for all MCP tool handlers.
 ToolResult = str

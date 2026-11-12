@@ -85,6 +85,19 @@ def blocked_message(model_id: str) -> str:
     )
 
 
+def unattended_refused_message(model: str, status: PrivacyStatus) -> str:
+    why = (
+        "Every provider serving it may store or train on prompts."
+        if status is PrivacyStatus.ALL_MAY_COLLECT
+        else "Its privacy status could not be checked."
+    )
+    return (
+        f"[sidekick] Not sent: `{model}` hasn't been accepted yet and sidekick couldn't ask "
+        f"you here. {why} Accept it once in an interactive session "
+        "(/sidekick:setup or any call there)."
+    )
+
+
 def account_policy_message(model_id: str) -> str:
     return (
         f"OpenRouter found no provider for `{model_id}` that your OpenRouter account's "
@@ -243,3 +256,60 @@ def resolve_gemini_alias(model: str, catalog: Sequence[ORModel], pinned: Mapping
     google_ids = [m.id for m in catalog if m.id.startswith("google/")]
     bare = models.resolve_latest(google_ids).get(family) or pinned[family]
     return "google/" + bare
+
+
+def subject_phrase(model_id: str, entry: Optional[ORModel]) -> str:
+    """What the user is being asked to use: a free model, a priced one, or an unpriced one."""
+    if is_free(model_id):
+        return f"the free model `{model_id}`"
+    if entry is not None and entry.prompt_price is not None and entry.completion_price is not None:
+        return f"`{model_id}` at {price_pair(entry)}"
+    return f"`{model_id}` (price not shown in OpenRouter's catalog: see {model_page(model_id)})"
+
+
+def acceptance_question(
+    model_id: str, entry: Optional[ORModel], status: PrivacyStatus, *, block: bool
+) -> str:
+    question = (
+        f"Use {subject_phrase(model_id, entry)}? {privacy_sentence(model_id, status, block=block)}"
+    )
+    return question + " " + FREE_LIMITS if is_free(model_id) else question
+
+
+def first_use_notice(
+    model_id: str,
+    entry: Optional[ORModel],
+    status: PrivacyStatus,
+    *,
+    block: bool,
+    forced_deny: bool = False,
+) -> str:
+    if forced_deny and status is PrivacyStatus.SOME_MAY_COLLECT:
+        privacy = "Some providers serving it may store or train on your prompts."
+    else:
+        privacy = privacy_sentence(model_id, status, block=block)
+    limits = " " + FREE_LIMITS if is_free(model_id) else ""
+    forced = (
+        " Sent with privacy-only routing (providers that don't collect data)."
+        if forced_deny
+        else ""
+    )
+    return (
+        f"[sidekick notice] First use of {subject_phrase(model_id, entry)}. "
+        f"{privacy}{limits}{forced} Shown once; accept it in /sidekick:setup to skip this.\n\n"
+    )
+
+
+def declined_message(model_id: str) -> str:
+    return (
+        f"[sidekick] Not sent: you declined `{model_id}`, so nothing went to OpenRouter. "
+        "Pass another model= (list_models shows prices and privacy), or omit model= for the default."
+    )
+
+
+def dismissed_message(model_id: str) -> str:
+    return (
+        f"[sidekick] Not sent: the question about `{model_id}` was dismissed, so nothing went "
+        "to OpenRouter. To use this model without being asked (for example in a non-interactive "
+        "session), accept it once in /sidekick:setup."
+    )

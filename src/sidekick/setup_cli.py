@@ -29,7 +29,13 @@ from typing import Any, Optional
 from pydantic import ValidationError
 
 from sidekick.auth import AuthError, _load_keychain, _looks_like_api_key
-from sidekick.config import CONFIG_PATH, AuthConfig, Config
+from sidekick.config import (
+    CONFIG_PATH,
+    OPENROUTER_ENV_VAR,
+    AuthConfig,
+    Config,
+    OpenRouterConfig,
+)
 
 DEFAULTS: dict[str, Any] = {
     "auth_method": "adc",
@@ -43,6 +49,7 @@ DEFAULTS: dict[str, Any] = {
     "api_key_env": "GEMINI_API_KEY",
 }
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+_OPENROUTER_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*/[A-Za-z0-9._:~-]{1,120}$")
 
 
 class SetupError(Exception):
@@ -256,10 +263,36 @@ def keychain_store(file: Path, service: str, account: str, delete_file: bool) ->
     }
 
 
+def _openrouter_values(config: dict[str, Any]) -> dict[str, Any]:
+    """The saved OpenRouter answers. Every id passes _OPENROUTER_ID, so a key saved where a
+    model id belongs is never surfaced."""
+    section = config.get("openrouter")
+    section = section if isinstance(section, dict) else {}
+    default = section.get("default_model")
+    accepted = section.get("accepted_models")
+    return {
+        "openrouter_default_model": default
+        if isinstance(default, str) and _OPENROUTER_ID.match(default)
+        else "",
+        "block_data_collection": section.get("block_data_collection") is True,
+        "openrouter_accepted_models": [
+            m
+            for m in (accepted if isinstance(accepted, list) else [])
+            if isinstance(m, str) and _OPENROUTER_ID.match(m)
+        ],
+    }
+
+
 def status(path: Path) -> dict[str, Any]:
     config, error = _read(path)
     config = config or {}
     values = _values(config)
+    values.update(_openrouter_values(config))
+    raw_default = (
+        (config.get("openrouter") or {}).get("default_model")
+        if isinstance(config.get("openrouter"), dict)
+        else None
+    )
     raw_api_key_env = _auth_dict(config).get("api_key_env")
     return {
         "config_path": str(path),
@@ -277,6 +310,10 @@ def status(path: Path) -> dict[str, Any]:
             # by the default — flags the problem without ever printing the invalid value itself.
             "api_key_env_invalid": isinstance(raw_api_key_env, str)
             and not _valid_env_name(raw_api_key_env),
+            # The plugin's key option is invisible here; this sees only a shell export.
+            "openrouter_key_env_set": bool(os.environ.get(OPENROUTER_ENV_VAR, "").strip()),
+            "openrouter_default_model_invalid": raw_default is not None
+            and not values["openrouter_default_model"],
         },
     }
 
@@ -359,9 +396,8 @@ def _backup(path: Path) -> Path:
     return backup
 
 
-def write(path: Path, args: argparse.Namespace) -> dict[str, Any]:
-    config, error = _read(path)
-    new, warnings = _merge(config or {}, args)  # raises before any file is touched
+def _save(path: Path, new: dict[str, Any], error: Optional[str]) -> Optional[Path]:
+    """Write new atomically; back up an unreadable old file first. Returns the backup path."""
     tmp = path.with_name(f"{path.name}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,10 +407,59 @@ def write(path: Path, args: argparse.Namespace) -> dict[str, Any]:
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise SetupError(f"Could not write {path}: {exc}") from exc
+    return backup
+
+
+def write(path: Path, args: argparse.Namespace) -> dict[str, Any]:
+    config, error = _read(path)
+    new, warnings = _merge(config or {}, args)  # raises before any file is touched
+    backup = _save(path, new, error)
     return {
         "ok": True,
         "config_path": str(path),
         "warnings": warnings,
+        "backup": str(backup) if backup else None,
+    }
+
+
+def openrouter_write(path: Path, args: argparse.Namespace) -> dict[str, Any]:
+    """Merge the OpenRouter answers into config.json. Raises SetupError; never sees a key."""
+    config, error = _read(path)
+    accept = args.accept or []
+    if args.default_model is None and not accept and args.block_data_collection is None:
+        raise SetupError(
+            "Nothing to change: pass --default-model, --accept or --block-data-collection."
+        )
+    ids = ([args.default_model] if args.default_model not in (None, "-") else []) + accept
+    if not all(_OPENROUTER_ID.match(i) for i in ids):
+        raise SetupError(
+            "That is not an OpenRouter model id (author/model, e.g. x-ai/grok-4.7). If you "
+            "pasted an API key, it belongs in the plugin's masked OpenRouter API key option, "
+            "never in the chat."
+        )
+    out = dict(config or {})
+    section = dict(out["openrouter"]) if isinstance(out.get("openrouter"), dict) else {}
+    if args.default_model == "-":
+        section.pop("default_model", None)
+    elif args.default_model:
+        section["default_model"] = args.default_model
+    if accept:
+        saved = section.get("accepted_models")
+        merged = [m for m in (saved if isinstance(saved, list) else []) if isinstance(m, str)]
+        merged += [m for m in dict.fromkeys(accept) if m not in merged]
+        section["accepted_models"] = merged
+    if args.block_data_collection is not None:
+        section["block_data_collection"] = args.block_data_collection == "on"
+    try:
+        OpenRouterConfig.model_validate(section)
+    except ValidationError as exc:
+        raise SetupError(exc.errors()[0]["msg"]) from exc
+    out["openrouter"] = section
+    backup = _save(path, out, error)
+    return {
+        "ok": True,
+        "config_path": str(path),
+        "openrouter": section,
         "backup": str(backup) if backup else None,
     }
 
@@ -399,6 +484,11 @@ def _parser() -> argparse.ArgumentParser:
     # cannot see, so the env-var checks are skipped.
     w.add_argument("--key-source", choices=["plugin", "env"], default="env")
     w.add_argument("--sa-file-source", choices=["plugin", "env"], default="env")
+    o = sub.add_parser("openrouter")
+    o.add_argument("--config", type=Path, default=CONFIG_PATH)
+    o.add_argument("--default-model")
+    o.add_argument("--accept", action="append")
+    o.add_argument("--block-data-collection", choices=["on", "off"])
     k = sub.add_parser("keychain-store")
     k.add_argument("--file", type=Path, required=True)
     k.add_argument("--keychain-service", default=DEFAULTS["keychain_service"])
@@ -417,6 +507,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             result = keychain_store(
                 args.file, args.keychain_service, args.keychain_account, args.delete_file
             )
+        elif args.command == "openrouter":
+            result = openrouter_write(args.config, args)
         else:
             result = write(args.config, args)
     except SetupError as exc:

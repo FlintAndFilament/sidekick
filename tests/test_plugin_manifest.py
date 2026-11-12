@@ -60,3 +60,19 @@ def test_manifest_declares_a_masked_openrouter_key_first() -> None:
     env = plugin["mcpServers"]["mcp"]["env"]
     assert env["SIDEKICK_OPENROUTER_KEY"] == "${user_config.openrouter_api_key}"
     assert "OPENROUTER_API_KEY" not in env  # never shadow a shell export
+
+
+def test_setup_leads_with_openrouter_and_shows_price_and_privacy() -> None:
+    text = (ROOT / "commands" / "setup.md").read_text()
+    for needle in (
+        "OpenRouter API key",
+        "sidekick-setup openrouter",
+        "check=",
+        "block_data_collection",
+        "20 requests a minute",
+        "sk-or-",
+        "/reload-plugins",
+        "has no billing",
+    ):
+        assert needle in text
+    assert text.index("OpenRouter") < text.index("Google AI Studio")

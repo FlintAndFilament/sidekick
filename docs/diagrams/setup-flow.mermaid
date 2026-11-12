@@ -5,6 +5,17 @@ flowchart TD
     UV -->|yes| ST["sidekick-setup status<br/>(+ setup_status if in setup mode)"]
     ST --> PATH{"which path?"}
 
+    PATH -->|"O. OpenRouter (recommended)"| O1["you: /plugin configure sidekick@sidekick<br/>paste the key on the OpenRouter API key row, Enter"]
+    O1 --> O2["you: /reload-plugins"]
+    O2 --> O3["list_models: five picks + free default, live prices"]
+    O3 --> O4["list_models(check=id): price + privacy sentence"]
+    O4 --> O5["choose: warn (default) or block_data_collection"]
+    O5 --> O6["sidekick-setup openrouter<br/>--default-model --accept --block-data-collection"]
+    O6 --> O7["you: /reload-plugins"]
+    O7 --> OV{"list_models shows the id as (default)?"}
+    OV -->|yes| OK
+    OV -->|"key error"| O1
+
     PATH -->|"A. API key in the keychain<br/>(recommended)"| A1["you: /plugin configure sidekick@sidekick<br/>paste the key on the Gemini API key row, Enter"]
     A1 --> A2["write --auth-method api_key<br/>--key-source plugin"]
 

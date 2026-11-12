@@ -168,3 +168,29 @@ def test_file_tools_rejects_nonpositive_write_cap() -> None:
 
     with pytest.raises(pydantic.ValidationError):
         Config(auth={"method": "api_key"}, file_tools={"max_write_bytes": 0})
+
+
+def test_openrouter_model_ids_must_look_like_ids(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    secret = "sk-or-v1-" + "a1b2c3d4" * 8
+    for bad in (
+        {"default_model": secret},
+        {"accepted_models": ["x-ai/grok-4.7", secret]},
+    ):
+        _write_config(path, {"auth": {"method": "api_key"}, "openrouter": bad})
+        with pytest.raises(ConfigError) as err:
+            load_config(path)
+        assert "validation failed" in str(err.value) and "openrouter" in str(err.value)
+        assert secret not in str(err.value) and "a1b2c3d4" not in str(err.value)
+
+
+def test_openrouter_valid_ids_load(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    _write_config(
+        path,
+        {
+            "auth": {"method": "api_key"},
+            "openrouter": {"default_model": "x-ai/grok-4.7", "accepted_models": ["a/b:free"]},
+        },
+    )
+    assert load_config(path).openrouter.default_model == "x-ai/grok-4.7"

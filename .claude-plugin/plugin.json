@@ -1,16 +1,22 @@
 {
   "name": "sidekick",
   "version": "0.5.2",
-  "description": "A second opinion from Google Gemini inside Claude Code: review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
+  "description": "A second opinion inside Claude Code from the model you choose: OpenRouter (Grok, Kimi, DeepSeek, Qwen, GPT, Claude, Gemini and more) or Google Gemini directly. Review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
   "author": {
     "name": "FlintAndFilament"
   },
   "repository": "https://github.com/FlintAndFilament/sidekick",
   "userConfig": {
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get one at openrouter.ai/settings/keys. One key reaches Grok, Kimi, DeepSeek, Qwen, GPT, Claude, Gemini and more. Stored in your system keychain.",
+      "sensitive": true
+    },
     "gemini_api_key": {
       "type": "string",
       "title": "Gemini API key",
-      "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get a free key at aistudio.google.com/apikey. Stored in your system keychain. Leave blank for Google Cloud Agent Platform or a shell-exported key.",
+      "description": "Paste your key right on this line (no separate prompt opens), then press Enter to save. Get a free key at aistudio.google.com/apikey. Stored in your system keychain. Leave blank if you only use OpenRouter, Google Cloud Agent Platform, or a shell-exported key.",
       "sensitive": true
     },
     "service_account_file": {
@@ -33,6 +39,7 @@
       "env": {
         "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
         "PYTHONUNBUFFERED": "1",
+        "SIDEKICK_OPENROUTER_KEY": "${user_config.openrouter_api_key}",
         "SIDEKICK_API_KEY": "${user_config.gemini_api_key}",
         "SIDEKICK_SA_FILE": "${user_config.service_account_file}"
       }

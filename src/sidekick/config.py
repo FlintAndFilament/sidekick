@@ -23,11 +23,19 @@ Imports:  sandbox.py (DEFAULT_DENY — stdlib-only module), pydantic
 
 import json
 import os
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from sidekick.sandbox import DEFAULT_DENY
 
@@ -40,6 +48,9 @@ PLUGIN_API_KEY_VAR = "SIDEKICK_API_KEY"
 # The plugin's "Service-account key file" picker, for auth.method="env". Not
 # GOOGLE_APPLICATION_CREDENTIALS, for the same no-shadowing reason.
 PLUGIN_SA_FILE_VAR = "SIDEKICK_SA_FILE"
+# The plugin's masked "OpenRouter API key" option; the shell fallback is OPENROUTER_API_KEY.
+PLUGIN_OPENROUTER_KEY_VAR = "SIDEKICK_OPENROUTER_KEY"
+OPENROUTER_ENV_VAR = "OPENROUTER_API_KEY"
 
 ThinkingLevel = Literal["none", "low", "medium", "high"]
 AuthMethod = Literal["adc", "env", "keychain", "api_key"]
@@ -88,6 +99,31 @@ class WebToolsConfig(BaseModel):
     enabled: bool = False  # the default answer for a call's `web` argument
 
 
+# An OpenRouter author/model id. Shared with setup so a key pasted where an id belongs is
+# rejected everywhere before it can reach a log line or a tool description.
+OPENROUTER_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*/[A-Za-z0-9._:~-]{1,120}$")
+
+
+class OpenRouterConfig(BaseModel):
+    """The OpenRouter backend. Holds no key: keys come from the environment only."""
+
+    default_model: Optional[str] = None
+    # Non-free models the user has agreed to spend on; see remember_accepted_model.
+    accepted_models: list[str] = Field(default_factory=list)
+    # true = send provider.data_collection="deny" on every request.
+    block_data_collection: bool = False
+
+    @field_validator("default_model", "accepted_models")
+    @classmethod
+    def _ids_look_like_model_ids(cls, value: object) -> object:
+        ids = [value] if isinstance(value, str) else (value or [])
+        for item in ids:  # type: ignore[attr-defined]
+            if not isinstance(item, str) or not OPENROUTER_ID.match(item):
+                # Never echo the value: it may be a pasted key.
+                raise ValueError("must be OpenRouter model ids shaped like author/model")
+        return value
+
+
 class Config(BaseModel):
     project: Optional[str] = None  # required for adc/env/keychain; unused for api_key
     location: str = "global"
@@ -101,10 +137,15 @@ class Config(BaseModel):
     file_tools: FileToolsConfig = FileToolsConfig()
     web_tools: WebToolsConfig = WebToolsConfig()
     auth: AuthConfig = AuthConfig()
+    openrouter: OpenRouterConfig = OpenRouterConfig()
 
     @model_validator(mode="after")
-    def project_required_for_vertex(self) -> "Config":
-        if self.auth.method != "api_key" and not self.project:
+    def project_required_for_vertex(self, info: ValidationInfo) -> "Config":
+        # An OpenRouter-only setup names no Gemini auth at all, so it needs no project.
+        openrouter_only = bool((info.context or {}).get("openrouter_key")) and (
+            "method" not in self.auth.model_fields_set
+        )
+        if self.auth.method != "api_key" and not self.project and not openrouter_only:
             raise ValueError(
                 "'project' is required for Google Cloud Agent Platform auth methods (adc, env, keychain). "
                 "Add it to config.json or switch to method='api_key'."
@@ -128,14 +169,34 @@ def plugin_api_key() -> Optional[str]:
     return plugin_option(PLUGIN_API_KEY_VAR)
 
 
+def openrouter_api_key() -> Optional[str]:
+    """The OpenRouter key: the plugin's masked option, else the shell export, else None."""
+    key = plugin_option(PLUGIN_OPENROUTER_KEY_VAR)
+    if key is not None:
+        return key
+    return os.environ.get(OPENROUTER_ENV_VAR, "").strip() or None
+
+
+def gemini_configured(config: Config, openrouter_key_present: bool) -> bool:
+    """False only for an OpenRouter-only setup: a key is present and Gemini was never set up."""
+    return (
+        not openrouter_key_present
+        or "method" in config.auth.model_fields_set
+        or bool(config.project)
+    )
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
     """Load and validate config from path. Raises ConfigError on any failure.
 
     With the plugin's API key option filled in, no file is needed and a file that names no
     auth method defaults to api_key: install, paste the key, done (#116)."""
+    ctx = {"openrouter_key": openrouter_api_key() is not None}
     if not path.exists():
         if plugin_api_key() is not None:
             return Config(auth=AuthConfig(method="api_key"))
+        if ctx["openrouter_key"]:
+            return Config.model_validate({}, context=ctx)
         raise ConfigError(f"Config file not found: {path}\nRun /sidekick:setup in Claude Code.")
     try:
         raw = json.loads(path.read_text())
@@ -148,6 +209,48 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         if not (isinstance(auth, dict) and "method" in auth):
             raw = {**raw, "auth": {**(auth if isinstance(auth, dict) else {}), "method": "api_key"}}
     try:
-        return Config(**raw)
+        return Config.model_validate(raw, context=ctx)
+    except ValidationError as exc:
+        # Built from loc + msg only: pydantic's own text echoes input values, which could be a key.
+        detail = "\n".join(
+            f"{'.'.join(str(p) for p in e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
+            for e in exc.errors(include_input=False)
+        )
+        raise ConfigError(
+            f"Config validation failed: {len(exc.errors())} validation errors\n{detail}"
+        ) from None
     except Exception as exc:
         raise ConfigError(f"Config validation failed: {exc}") from exc
+
+
+def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
+    """Record a paid OpenRouter model as accepted in config.json. Raises ConfigError.
+
+    Never overwrites a file it cannot parse; the write goes through a temp file and os.replace."""
+    try:
+        raw = json.loads(path.read_text()) if path.exists() else {}
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Config file is not valid JSON ({path}): {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"Config file could not be read ({path}): {exc.strerror}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Config file must hold a JSON object ({path}).")
+    section = raw.get("openrouter")
+    if section is None:
+        section = {}
+    if not isinstance(section, dict):
+        raise ConfigError(f"'openrouter' in {path} must be a JSON object.")
+    accepted = section.get("accepted_models", [])
+    if not isinstance(accepted, list):
+        raise ConfigError(f"'openrouter.accepted_models' in {path} must be a list.")
+    if model_id in accepted:
+        return
+    raw["openrouter"] = {**section, "accepted_models": [*accepted, model_id]}
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(raw, indent=2) + "\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise ConfigError(f"Config file could not be written ({path}): {exc.strerror}") from exc

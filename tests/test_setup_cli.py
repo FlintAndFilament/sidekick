@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from sidekick import setup_cli
-from tests._fakes import FAKE_GOOGLE_API_KEY
+from tests._fakes import FAKE_GOOGLE_API_KEY, FAKE_OPENROUTER_KEY
 
 # Captured before any test monkeypatches setup_cli._keychain_problem, so tests that need the
 # real validation logic (not the autouse no-op below) can restore it.
@@ -462,3 +462,89 @@ class TestKeychainStore:
         monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
         code, out = self._store("--file", str(key))
         assert code == 0 and out["ok"] is True
+
+
+class TestOpenRouter:
+    def test_sets_default_model_and_accepts(self, cfg):
+        code, out = run(
+            cfg, "openrouter", "--default-model", "x-ai/grok-4.7", "--accept", "x-ai/grok-4.7"
+        )
+        assert code == 0 and out["ok"] is True
+        assert data(cfg) == {
+            "openrouter": {"default_model": "x-ai/grok-4.7", "accepted_models": ["x-ai/grok-4.7"]}
+        }
+
+    def test_dash_clears_the_default_and_accept_dedupes(self, cfg):
+        run(cfg, "openrouter", "--default-model", "x-ai/grok-4.7", "--accept", "x-ai/grok-4.7")
+        run(cfg, "openrouter", "--default-model", "-", "--accept", "x-ai/grok-4.7")
+        assert data(cfg) == {"openrouter": {"accepted_models": ["x-ai/grok-4.7"]}}
+
+    def test_block_switch(self, cfg):
+        run(cfg, "openrouter", "--block-data-collection", "on")
+        assert data(cfg)["openrouter"]["block_data_collection"] is True
+        run(cfg, "openrouter", "--block-data-collection", "off")
+        assert data(cfg)["openrouter"]["block_data_collection"] is False
+
+    def test_other_keys_survive(self, cfg):
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(
+            json.dumps({"project": "p", "auth": {"method": "adc"}, "default_thinking": "low"})
+        )
+        run(cfg, "openrouter", "--default-model", "x-ai/grok-4.7")
+        assert data(cfg) == {
+            "project": "p",
+            "auth": {"method": "adc"},
+            "default_thinking": "low",
+            "openrouter": {"default_model": "x-ai/grok-4.7"},
+        }
+
+    @pytest.mark.parametrize("flag", ["--default-model", "--accept"])
+    def test_a_pasted_openrouter_key_is_rejected_without_echo(self, cfg, flag):
+        code, out = run(cfg, "openrouter", flag, FAKE_OPENROUTER_KEY)
+        assert code == 2 and "masked OpenRouter API key option" in out["error"]
+        assert FAKE_OPENROUTER_KEY not in json.dumps(out) and not cfg.exists()
+
+    def test_nothing_to_change_is_an_error(self, cfg):
+        code, out = run(cfg, "openrouter")
+        assert code == 2 and out["error"].startswith("Nothing to change")
+
+    def test_unparsable_config_is_backed_up(self, cfg):
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("{bad")
+        code, out = run(cfg, "openrouter", "--block-data-collection", "on")
+        assert code == 0 and out["backup"]
+
+    def test_status_reports_openrouter_values(self, cfg, monkeypatch):
+        run(
+            cfg,
+            "openrouter",
+            "--default-model",
+            "x-ai/grok-4.7",
+            "--accept",
+            "x-ai/grok-4.7",
+            "--block-data-collection",
+            "on",
+        )
+        monkeypatch.setenv("OPENROUTER_API_KEY", "x")
+        _, out = run(cfg, "status")
+        assert out["values"]["openrouter_default_model"] == "x-ai/grok-4.7"
+        assert out["values"]["block_data_collection"] is True
+        assert out["values"]["openrouter_accepted_models"] == ["x-ai/grok-4.7"]
+        assert out["checks"]["openrouter_key_env_set"] is True
+
+    def test_status_never_echoes_a_key_saved_as_a_model(self, cfg):
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(
+            json.dumps(
+                {
+                    "openrouter": {
+                        "default_model": FAKE_OPENROUTER_KEY,
+                        "accepted_models": [FAKE_OPENROUTER_KEY],
+                    }
+                }
+            )
+        )
+        _, out = run(cfg, "status")
+        assert FAKE_OPENROUTER_KEY not in json.dumps(out)
+        assert out["values"]["openrouter_default_model"] == ""
+        assert out["checks"]["openrouter_default_model_invalid"] is True

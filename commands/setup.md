@@ -1,5 +1,5 @@
 ---
-description: Set up sidekick (Gemini second opinion): check uv, pick an auth path, verify it works
+description: Set up sidekick (a second opinion from the model you choose): check uv, pick OpenRouter or Gemini, verify it works
 allowed-tools: Bash(uv --version), Bash(UV_PROJECT_ENVIRONMENT=* uv run --frozen --quiet --project * sidekick-setup *), AskUserQuestion, mcp__plugin_sidekick_mcp__setup_status, mcp__plugin_sidekick_mcp__list_models
 ---
 
@@ -8,10 +8,10 @@ what the user does next. Never ask for the key itself, never ask the user to pas
 it into the chat, and never read, print or store its value. The key only ever goes
 into Claude Code's own masked plugin prompt.
 
-If any answer looks like a key (starts with `AIza` or `AQ`, or is long mixed-case text,
+If any answer looks like a key (starts with `sk-or-`, `AIza` or `AQ`, or is long mixed-case text,
 or is JSON with `private_key`), never put it in a command, never repeat it, and
 don't use it. Tell the user it was a key and that it belongs in the plugin's
-masked option (path A), and suggest rotating it, since it is now in this chat.
+masked option (path O or A), and suggest rotating it, since it is now in this chat.
 
 Run every setup command exactly like this, so it uses the server's own venv
 instead of a second one:
@@ -38,9 +38,13 @@ instead of a second one:
    the user their config couldn't be read and will be backed up.
    If the `setup_status` tool is available, call it: it says why the server
    could not start, which tells you what to fix.
-3. Ask which auth path, with AskUserQuestion. Put the saved one first (from
-   `values.auth_method`); for a new user put path A first and mark it
-   "(Recommended)":
+3. Ask which path, with AskUserQuestion. Put the saved one first: path O when
+   `values.openrouter_default_model` is set or `checks.openrouter_key_env_set`
+   is true, otherwise from `values.auth_method`. For a new user put path O
+   first and mark it "(Recommended)":
+   - **O. OpenRouter** (`openrouter`): one key, many models (Grok, Kimi,
+     DeepSeek, Gemini and more), with live prices and a free model. Label it
+     "OpenRouter (one key, many models)".
    - **A. API key in the keychain** (`api_key`): a Google AI Studio key, kept
      by Claude Code in the system keychain (macOS Keychain; a protected
      credentials file elsewhere). No shell setup. Label it "API key (keychain)".
@@ -52,12 +56,59 @@ instead of a second one:
      Platform".
 4. Follow the chosen path:
 
+   **O. OpenRouter.** Numbered sub-steps:
+   1. Tell the user: "Run `/plugin configure sidekick@sidekick`. On the
+      **OpenRouter API key** row, paste your key directly (get one at
+      https://openrouter.ai/settings/keys), then press Enter. It is stored in
+      your keychain. Then run `/reload-plugins`." Use AskUserQuestion: "Done" or
+      "I need a key first".
+   2. Call `list_models` (no arguments). Show its rows for the five picks and
+      the free default in a short list, with prices exactly as shown. Say:
+      "Prices are per 1M tokens, input / output, live from OpenRouter.
+      OpenRouter adds no markup; its fee is on buying credits." Use
+      AskUserQuestion with 4 options: "Free model (skip)",
+      "deepseek/deepseek-v4.1-flash-1017: best value",
+      "moonshotai/kimi-k3.1-pro: best quality", "x-ai/grok-4.7". The automatic
+      "Other" takes any id (for example `qwen/qwen3.8-max-0902` or
+      `google/gemini-3.8-flash`). On "Free model (skip)", use the id marked
+      `(free default)`. If the "Other" answer looks like a key (`sk-or-`,
+      `AIza`, `AQ`, or `private_key` JSON), apply the key rule: do not run any
+      command with it, and tell the user to paste keys only in the plugin
+      option.
+   3. Call `list_models(check='<id>')` and show its privacy sentence verbatim.
+      For a free model, also show its limits line (it says free models allow
+      20 requests a minute and 50 a day) and say: "Free models are often served
+      by providers that store or train on prompts." Use AskUserQuestion: "Use
+      it" or "Pick another" (on "Pick another", go back to sub-step 2).
+   4. Use AskUserQuestion: "Warn me about providers that may store or train on
+      prompts (Recommended)" or "Block them (block_data_collection)". If they
+      block and the check said every provider may store or train on prompts,
+      say: "With blocking on, this model can't be used, because every provider
+      serving it may store or train on prompts." Then go back to sub-step 2.
+   5. Say once: "OpenRouter screens all requests for abuse and keeps flagged
+      content (since 2026-10-27); this happens whatever sidekick's settings are."
+   6. Run `… sidekick-setup openrouter --default-model '<id>' --accept '<id>'
+      --block-data-collection 'on|off'`. For the free choice, pass
+      `--default-model '-'` so the live free default is used, and `--accept` the
+      checked free id. On `"ok": false`, show `error`. The command never sees
+      the key.
+   7. Tell the user to run `/reload-plugins`, then call
+      `list_models(refresh=true)`. Setup is complete when the chosen id shows
+      `(default)`. A `[sidekick error]` from sub-step 3 that mentions the API
+      key means the key is wrong: go back to sub-step 1.
+   To accept another model for unattended use later: first run
+   `list_models(check='<id>')`, show the user the price and privacy sentence, and
+   only on their OK run `sidekick-setup openrouter --accept '<id>'`.
+   Path O skips steps 5 to 7 below.
+
    **A. Keychain.** Tell the user, in these words: "Run
    `/plugin configure sidekick@sidekick`. On the **Gemini API key** row, paste
    your key directly. Pressing Enter on an empty row does not open
    a prompt; it just closes. The key shows masked except its last few
    characters. Press Enter to save. It is stored in your keychain. Get a key
-   at https://aistudio.google.com/apikey." Then use
+   at https://aistudio.google.com/apikey. If this key's Cloud project
+   has no billing, Google may use prompts and responses to improve its products
+   (block_data_collection does not apply to Gemini)." Then use
    AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key' --key-source 'plugin'`.
    To change or replace the key later, the user repeats the same steps; see
    docs/auth.md, "Change settings & reconnect".
@@ -65,7 +116,9 @@ instead of a second one:
    **B. Env var.** Ask for the NAME of the variable (default
    `values.api_key_env`, normally `GEMINI_API_KEY`). Say plainly that the
    variable must be set in the environment Claude Code is started from, and
-   that path A avoids that. Write `--auth-method 'api_key' --api-key-env '…'`.
+   that path A avoids that. Tell the user: if this key's Cloud project has no
+   billing, Google may use prompts and responses to improve its products
+   (block_data_collection does not apply to Gemini). Write `--auth-method 'api_key' --api-key-env '…'`.
    If the user has also filled the plugin's key option, that option wins.
 
    **C. Agent Platform.** Ask how to sign in, from `auth_methods` only:

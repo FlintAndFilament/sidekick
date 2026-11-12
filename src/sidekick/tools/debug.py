@@ -14,15 +14,15 @@ Design notes:
   - System prompt: evidence-based, not speculative — generates hypotheses from what's shown
 
 Used by:  tools/__init__.py -> register_debug(), server.py (via tools/__init__)
-Imports:  tools/base.py (call_gemini), client.py (GeminiClient), transcript.py (TranscriptWriter)
+Imports:  tools/base.py (call_gemini), backends.py (ModelSource), transcript.py (TranscriptWriter)
 """
 
 from typing import Annotated, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.config import ThinkingLevel
 from sidekick.tools.base import (
     ArtifactMode,
@@ -30,6 +30,7 @@ from sidekick.tools.base import (
     ToolResult,
     call_gemini,
     capability_hint,
+    elicitor,
     model_param_hint,
     session_param_hint,
     tool_annotations,
@@ -52,7 +53,7 @@ _ARTIFACTS: ArtifactMode = "never"
 
 # Advertised to the MCP client; capability_hint() appends the file-tool row (#74).
 _DESCRIPTION = (
-    "Ask Gemini for root cause hypotheses and diagnostic steps. Provide the error "
+    "Ask the sidekick model for root cause hypotheses and diagnostic steps. Provide the error "
     "and any relevant context (code, recent changes, environment)."
 )
 
@@ -66,7 +67,7 @@ CAPABILITY = ToolCapability(
 
 def register(
     mcp: FastMCP,
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> None:
@@ -81,10 +82,13 @@ def register(
             artifacts=_ARTIFACTS,
             web_default=client.web_default,
             web_supported=client.web_supported,
+            default_backend=client.surface.primary,
+            gemini_available=client.surface.gemini_available,
         ),
         annotations=tool_annotations(workspace, write=_WRITE),
     )
     async def debug(
+        ctx: Context,  # type: ignore[type-arg]
         error: Annotated[
             str, Field(description="The error message, stack trace, or failure description")
         ],
@@ -108,9 +112,9 @@ def register(
             Optional[bool],
             Field(
                 description=(
-                    "Let Gemini search the web and fetch URLs for this call. Omit to use the "
+                    "Let the model search the web (Gemini models only; ignored with a notice on OpenRouter) and fetch URLs for this call. Omit to use the "
                     "server default. Retrieved pages are untrusted text — treat what "
-                    "Gemini concludes from them as a claim to check."
+                    "the model concludes from them as a claim to check."
                 )
             ),
         ] = None,
@@ -128,4 +132,5 @@ def register(
             workspace=workspace,
             write=_WRITE,
             web=web,
+            elicit=elicitor(ctx),
         )

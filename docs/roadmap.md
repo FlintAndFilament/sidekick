@@ -225,7 +225,9 @@ Also in `v0.5.0`:
 
 ## Open
 
-None.
+### OpenRouter backend (#133)
+
+On `develop`, not yet promoted. Tool use for OpenRouter models is #132.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 

@@ -24,7 +24,13 @@ extras, so it uninstalls pytest, ruff and the rest. If the tests suddenly can't 
 .venv/bin/python -m pytest -q
 ```
 
-Run pytest for the current count. Every test is mocked: no network calls, and the suite runs
+Run pytest for the current count.
+
+`tests/conftest.py` scrubs `SIDEKICK_OPENROUTER_KEY` and `OPENROUTER_API_KEY` so a key in your
+shell cannot leak into a test. OpenRouter tests use `tests/_openrouter_fixtures.py` (an httpx
+`MockTransport`, no network).
+
+Every test is mocked: no network calls, and the suite runs
 in about 3 seconds.
 
 ## Running the plugin locally

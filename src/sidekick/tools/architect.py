@@ -14,15 +14,15 @@ Design notes:
   - System prompt: opinionated when a clearly better path exists; names tradeoffs explicitly
 
 Used by:  tools/__init__.py -> register_architect(), server.py (via tools/__init__)
-Imports:  tools/base.py (call_gemini), client.py (GeminiClient), transcript.py (TranscriptWriter)
+Imports:  tools/base.py (call_gemini), backends.py (ModelSource), transcript.py (TranscriptWriter)
 """
 
 from typing import Annotated, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.config import ThinkingLevel
 from sidekick.tools.base import (
     ArtifactMode,
@@ -30,6 +30,7 @@ from sidekick.tools.base import (
     ToolResult,
     call_gemini,
     capability_hint,
+    elicitor,
     model_param_hint,
     session_param_hint,
     tool_annotations,
@@ -53,7 +54,7 @@ _ARTIFACTS: ArtifactMode = "default"
 
 # Advertised to the MCP client; capability_hint() appends the file-tool row (#74).
 _DESCRIPTION = (
-    "Ask Gemini to evaluate a system design or architecture. Gemini will be opinionated "
+    "Ask the sidekick model to evaluate a system design or architecture. It will be opinionated "
     "where warranted and name tradeoffs explicitly when choices are context-dependent."
 )
 
@@ -67,7 +68,7 @@ CAPABILITY = ToolCapability(
 
 def register(
     mcp: FastMCP,
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> None:
@@ -82,10 +83,13 @@ def register(
             artifacts=_ARTIFACTS,
             web_default=client.web_default,
             web_supported=client.web_supported,
+            default_backend=client.surface.primary,
+            gemini_available=client.surface.gemini_available,
         ),
         annotations=tool_annotations(workspace, write=_WRITE),
     )
     async def architect(
+        ctx: Context,  # type: ignore[type-arg]
         description: Annotated[
             str, Field(description="The system design, architecture, or approach to evaluate")
         ],
@@ -107,10 +111,11 @@ def register(
             Optional[bool],
             Field(
                 description=(
-                    "Let Gemini search the web and fetch URLs for this call. Omit to use the "
-                    "server default. Retrieved pages are untrusted text, so while web "
-                    "access is on write_file is withheld and Gemini cannot modify the "
-                    "working tree."
+                    "Let the model search the web (Gemini models only; ignored with a "
+                    "notice on OpenRouter) and fetch URLs for this call. Omit to use the "
+                    "server default. Retrieved pages are untrusted text, so on Gemini, "
+                    "while web access is on write_file is withheld and the model cannot "
+                    "modify the working tree."
                 )
             ),
         ] = None,
@@ -137,5 +142,6 @@ def register(
             workspace=workspace,
             write=_WRITE,
             web=web,
+            elicit=elicitor(ctx),
             artifact_topic=(question or description) if write_artifact else None,
         )

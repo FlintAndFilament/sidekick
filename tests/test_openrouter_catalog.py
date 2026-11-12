@@ -111,8 +111,8 @@ def test_free_candidates_preferences_first_then_context():
     [
         ("low", GROK, "low"),
         ("none", GROK, "low"),  # mandatory: never "none"
-        ("medium", KIMI, "high"),
-        ("none", KIMI, "none"),  # nearest higher supported
+        ("medium", KIMI, "high"),  # nearest higher supported
+        ("none", KIMI, "none"),
         ("high", entry("a/b", efforts=("low", "medium")), "medium"),  # none higher: the highest
         ("high", GEMMA, None),  # no reasoning parameter: omit
         ("none", None, None),
@@ -126,6 +126,20 @@ def test_map_effort(level, raw, want):
 def test_none_on_optional_reasoning_omits_field():
     optional = entry("a/b", efforts=("high", "medium"), mandatory=False)
     assert oc.map_effort("none", P(optional)) is None
+
+
+@pytest.mark.parametrize(
+    "level,efforts,want",
+    [
+        ("none", ("weird", "low"), "low"),
+        ("none", ("weird",), None),
+        ("none", (), None),
+        ("medium", (), "medium"),
+    ],
+)
+def test_map_effort_unknown_or_empty_efforts(level, efforts, want):
+    mandatory = entry("a/b", efforts=efforts, mandatory=True)
+    assert oc.map_effort(level, P(mandatory)) == want
 
 
 def test_resolve_gemini_alias():

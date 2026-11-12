@@ -185,12 +185,10 @@ def map_effort(level: ThinkingLevel, model: Optional[ORModel]) -> Optional[str]:
         return None if level == "none" else level
     if level in efforts:
         return level
+    ranked = sorted((e for e in efforts if e in EFFORT_ORDER), key=EFFORT_ORDER.index)
     if level == "none":
         # Unsupported "none": a mandatory-reasoning model gets its lowest effort, others omit.
-        if not model.reasoning_mandatory:
-            return None
-        return min(efforts, key=EFFORT_ORDER.index)
-    ranked = sorted((e for e in efforts if e in EFFORT_ORDER), key=EFFORT_ORDER.index)
+        return ranked[0] if ranked and model.reasoning_mandatory else None
     if not ranked:
         return level
     above = [e for e in ranked if EFFORT_ORDER.index(e) > EFFORT_ORDER.index(level)]

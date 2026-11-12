@@ -64,14 +64,15 @@ def privacy_sentence(model_id: str, status: PrivacyStatus, *, block: bool) -> st
     if status is PrivacyStatus.ALL_MAY_COLLECT:
         return "Every provider serving it may store or train on your prompts, including any code sent with them."
     if status is PrivacyStatus.SOME_MAY_COLLECT:
+        if block:
+            return (
+                "Some providers serving it may store or train on your prompts. Your "
+                "block_data_collection setting keeps it to providers that don't collect data."
+            )
         text = (
             "Some providers serving it may store or train on your prompts, "
             "and OpenRouter may route this call to one of them."
         )
-        if block:
-            text += (
-                " Your block_data_collection setting keeps it to providers that don't collect data."
-            )
         return text
     return (
         f"Whether its providers store or train on prompts is unknown; see {model_page(model_id)}."

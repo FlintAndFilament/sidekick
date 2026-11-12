@@ -159,3 +159,12 @@ def test_first_use_notice_forced_deny_suffix_only_when_forced():
     assert "privacy-only routing" not in first_use_notice(*args, block=False, forced_deny=False)
     forced = first_use_notice(*args, block=False, forced_deny=True)
     assert "privacy-only routing" in forced and "may route this call" not in forced
+
+
+def test_privacy_sentence_with_block_does_not_say_it_may_route_to_collectors():
+    from sidekick.openrouter_catalog import PrivacyStatus, privacy_sentence
+
+    on = privacy_sentence("x-ai/grok-4.7", PrivacyStatus.SOME_MAY_COLLECT, block=True)
+    assert "may route" not in on and "block_data_collection" in on
+    off = privacy_sentence("x-ai/grok-4.7", PrivacyStatus.SOME_MAY_COLLECT, block=False)
+    assert "may route this call" in off

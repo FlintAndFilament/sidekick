@@ -38,6 +38,9 @@ from sidekick.openrouter_catalog import (
     OPENROUTER_BASE_URL,
     PINNED_FREE_MODEL,
     ORModel,
+    PrivacyStatus,
+    account_policy_message,
+    blocked_message,
     free_candidates,
     is_free,
     map_effort,
@@ -58,6 +61,9 @@ ATTRIBUTION_HEADERS = {
     "X-OpenRouter-Title": "sidekick",
 }
 FREE_MAX_RETRIES = 1
+FREE_COOLDOWN_SECONDS = 600.0
+PROBE_MAX_TOKENS = 16
+_DENY = {"data_collection": "deny"}
 _RETRY_STATUSES = frozenset({429, 502, 503})
 
 _GATED_STEP = "Gate Free Endpoints by Agentic Harness"
@@ -143,6 +149,10 @@ class OpenRouterClient:
         self._catalog: list[ORModel] = []
         self._catalog_loaded = False
         self._sessions: OrderedDict[str, Session] = OrderedDict()
+        self._privacy: dict[str, PrivacyStatus] = {}
+        self._deny_models: set[str] = set()
+        self._gated: set[str] = set()
+        self._cooling: dict[str, float] = {}
 
     # --- Backend surface -------------------------------------------------------------------
 
@@ -198,12 +208,57 @@ class OpenRouterClient:
     def entry(self, model_id: str) -> Optional[ORModel]:
         return next((m for m in self._catalog if m.id == model_id), None)
 
+    @property
+    def free_candidates(self) -> list[str]:
+        """Free models to try now: not gated for this key, not cooling after a 429."""
+        now = self._clock()
+        return [
+            m
+            for m in free_candidates(self._catalog)
+            if m not in self._gated and self._cooling.get(m, 0.0) <= now
+        ]
+
+    def fallback_for(self, model: str) -> Optional[str]:
+        if not is_free(model):
+            return None
+        return next((m for m in self.free_candidates if m != model), None)
+
+    @staticmethod
+    def can_fall_back(exc: ClientError) -> bool:
+        return isinstance(exc, OpenRouterError) and (exc.status in (429, 503) or exc.gated)
+
+    def cached_privacy(self, model: str) -> Optional[PrivacyStatus]:
+        return self._privacy.get(model)
+
+    async def privacy_status(self, model: str) -> PrivacyStatus:
+        """Probe whether any provider for `model` may collect data (one tiny deny-request)."""
+        cached = self._privacy.get(model)
+        if cached is not None:
+            return cached
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": "."}],
+            "max_tokens": PROBE_MAX_TOKENS,
+            "provider": dict(_DENY),
+        }
+        try:
+            await self._post(body, retries=0)
+            status = PrivacyStatus.SOME_MAY_COLLECT
+        except OpenRouterError as exc:
+            if exc.status in (401, 402):
+                raise
+            status = PrivacyStatus.ALL_MAY_COLLECT if exc.data_policy else PrivacyStatus.UNKNOWN
+        except ClientError:
+            status = PrivacyStatus.UNKNOWN
+        self._privacy[model] = status
+        return status
+
     def resolve_model(self, model: Optional[str]) -> str:
         if model is None:
             configured = self._config.openrouter.default_model
             if configured:
                 return configured
-            free = free_candidates(self._catalog)
+            free = self.free_candidates
             return free[0] if free else PINNED_FREE_MODEL
         if "/" in model:
             return model
@@ -253,11 +308,33 @@ class OpenRouterClient:
         messages += [{"role": m.role, "content": m.content} for m in session.history]
         messages.append({"role": "user", "content": prompt})
         body: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
+        block = self._config.openrouter.block_data_collection
+        if block or model in self._deny_models:
+            body["provider"] = dict(_DENY)
         effort = map_effort(thinking or self.default_thinking, entry)
         if effort is not None:
             body["reasoning"] = {"effort": effort, "exclude": True}
         retries = FREE_MAX_RETRIES if is_free(model) else _MAX_RETRIES
-        data = await self._post(body, retries=retries)
+        try:
+            data = await self._post(body, retries=retries)
+        except OpenRouterError as exc:
+            if exc.data_policy:
+                if block:
+                    refusal = blocked_message(model)
+                elif model in self._deny_models:
+                    refusal = (
+                        f"[sidekick] Not sent: no provider for `{model}` that doesn't "
+                        "collect data is available right now."
+                    )
+                else:
+                    refusal = account_policy_message(model)
+                raise OpenRouterError(refusal, status=404, routing_step=exc.routing_step) from exc
+            if is_free(model):
+                if exc.gated:
+                    self._gated.add(model)
+                elif exc.status == 429:
+                    self._cooling[model] = self._clock() + FREE_COOLDOWN_SECONDS
+            raise
 
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") if isinstance(choice, dict) else None

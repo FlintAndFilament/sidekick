@@ -22,6 +22,7 @@ Imports:  sidekick.models, sidekick.config
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from enum import Enum
 from typing import Any, Optional
 
 from sidekick import models
@@ -51,6 +52,45 @@ _CENT = Decimal("0.01")
 
 def model_page(model_id: str) -> str:
     return "https://openrouter.ai/" + model_id
+
+
+class PrivacyStatus(str, Enum):
+    ALL_MAY_COLLECT = "all"
+    SOME_MAY_COLLECT = "some"
+    UNKNOWN = "unknown"
+
+
+def privacy_sentence(model_id: str, status: PrivacyStatus, *, block: bool) -> str:
+    if status is PrivacyStatus.ALL_MAY_COLLECT:
+        return "Every provider serving it may store or train on your prompts, including any code sent with them."
+    if status is PrivacyStatus.SOME_MAY_COLLECT:
+        text = (
+            "Some providers serving it may store or train on your prompts, "
+            "and OpenRouter may route this call to one of them."
+        )
+        if block:
+            text += (
+                " Your block_data_collection setting keeps it to providers that don't collect data."
+            )
+        return text
+    return (
+        f"Whether its providers store or train on prompts is unknown; see {model_page(model_id)}."
+    )
+
+
+def blocked_message(model_id: str) -> str:
+    return (
+        "Blocked by your setting `block_data_collection`: every provider serving "
+        f"`{model_id}` may store or train on prompts."
+    )
+
+
+def account_policy_message(model_id: str) -> str:
+    return (
+        f"OpenRouter found no provider for `{model_id}` that your OpenRouter account's "
+        "privacy settings allow (https://openrouter.ai/settings/privacy). "
+        "Change them there, or pick another model."
+    )
 
 
 def is_free(model_id: str) -> bool:

@@ -19,7 +19,9 @@ half-written config.
 `setup_status`, which names the problem, and the log says the same (see [logging.md](logging.md)).
 The messages are `Config file not found`, `Config file is not valid JSON`, `Config file could not
 be read` and `Config validation failed: …`. A missing file is fine when the plugin's **Gemini API
-key** option is set: the server then runs on that key with every default. Unknown keys are
+key** option or **OpenRouter API key** option is set: the server then runs on that key with every
+default. A missing `project` is also fine when an OpenRouter key is set and no Gemini method is
+configured. Unknown keys are
 ignored silently, so check spelling if a setting seems to have no effect.
 
 ## Full example
@@ -268,9 +270,55 @@ SDK explicitly, so any other key variable in your environment is not used.
 
 ---
 
+### `openrouter.default_model`
+
+**Type:** string
+**Default:** unset (the live free default)
+**Example:** `"deepseek/deepseek-v4.1-flash-1017"`
+
+The model used when a call passes no `model=` and an OpenRouter key is set. Unset means the
+current free default from OpenRouter's catalog. `/sidekick:setup` writes it.
+
+---
+
+### `openrouter.accepted_models`
+
+**Type:** list of strings
+**Default:** `[]`
+
+OpenRouter models you have agreed to use. The first call on a model that is not listed asks one
+question showing its price and privacy status. Accepting it adds the id here, so the question is
+not asked again. Declining or cancelling sends nothing. When the client cannot ask (unattended),
+the call is not sent unless some providers for the model do not collect data; then it goes out
+with deny routing and a one-time notice. The full flow:
+[first-use-acceptance](diagrams/first-use-acceptance.mermaid). To accept a model ahead of time:
+`sidekick-setup openrouter --accept '<id>'`.
+
+---
+
+### `openrouter.block_data_collection`
+
+**Type:** boolean
+**Default:** `false` (allow, with a warning)
+
+When `true`, sidekick sends `provider.data_collection: "deny"` on every OpenRouter request, and a
+model whose providers all may store or train on prompts is blocked with "Blocked by your setting
+`block_data_collection`". Whether `"deny"` also excludes providers that keep prompts only for abuse
+checks ("Safety Retention") is not stated by OpenRouter, so it is not guaranteed. Your OpenRouter
+account has its own privacy settings: https://openrouter.ai/settings/privacy. OpenRouter also
+screens all requests for abuse and keeps flagged content (since 2026-10-27), whatever sidekick's
+settings are. The setting does not apply to Gemini.
+
+---
+
 ## Choosing a model
 
-Every tool accepts an optional `model=` parameter.
+Every tool accepts an optional `model=` parameter. With an OpenRouter key set, an `author/model`
+id goes to OpenRouter; `flash`, `flash-lite`, `pro` and `gemini-*` go to Gemini when it is
+configured, otherwise to `google/<id>` on OpenRouter. Omitting `model=` uses
+`openrouter.default_model`, or the live free default. The routing is drawn in
+[diagrams/backend-routing.mermaid](diagrams/backend-routing.mermaid); the Gemini rules below
+apply to the Gemini side.
 
 | You pass | You get |
 |---|---|

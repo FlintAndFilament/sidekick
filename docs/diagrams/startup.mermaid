@@ -4,6 +4,13 @@ flowchart TD
     CFG -->|ok| AUTH["build_auth(config.auth)<br/>plugin option first, then shell env"]
     ENV -.-> AUTH
     AUTH -->|ok| CL["GeminiClient(config, credentials, api_key)"]
+    ENV -.->|"SIDEKICK_OPENROUTER_KEY"| ORK{"OpenRouter key set?"}
+    CL --> ORK
+    ORK -->|yes| RT["Router(OpenRouterClient + Gemini)"]
+    AUTH -->|"AuthError + key present"| ORO["OpenRouter only<br/>WARNING logged: Gemini backend unavailable"]
+    ORO --> RT
+    RT --> ROOT
+    ORK -->|no| LAT
     CL --> LAT["client.refresh_latest()<br/>pinned ids if models.list fails"]
     LAT --> ROOT["project_root()<br/>CLAUDE_PROJECT_DIR, else cwd"]
     ROOT --> TR["TranscriptWriter(dir, startup, base=root)"]

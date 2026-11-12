@@ -24,6 +24,10 @@ Package root: `src/sidekick/`.
 | `auth.py` | Credentials for `adc`, `env`, `keychain` and `api_key`; `build_auth()` returns `AuthResult(credentials, api_key)`; raises `AuthError`. The plugin option wins over the shell env: `api_key` reads `SIDEKICK_API_KEY`, then the var named by `api_key_env` (default `GEMINI_API_KEY`); `env` reads `SIDEKICK_SA_FILE`, then `GOOGLE_APPLICATION_CREDENTIALS`. An SA-file value is echoed in errors and logs only when it is path-shaped (#116, #119) | config |
 | `errors.py` | `ClientError`, in its own module so `client.py` and `tool_loop.py` can both raise it | none |
 | `models.py` | Model taxonomy: per-backend shortlist, backend detection, schema hint, chat-capable filter, newest-per-family resolution, alias mapping. Pure, no I/O | none |
+| `backends.py` | Pure types shared by every backend: `Session`, the `Backend` and `ModelSource` protocols, `Surface`, `Preflight`, `Elicit`. No SDK imports | config, errors |
+| `router.py` | `Router`: the `ModelSource` the tools see when an OpenRouter key is set. Routes each call to OpenRouter or Gemini, merges sessions, reports the `Surface` (see [backend-routing](diagrams/backend-routing.mermaid)) | backends, client, openrouter |
+| `openrouter.py` | `OpenRouterClient`: chat over OpenRouter's HTTP API, retries, the first-use price and privacy preflight ([first-use-acceptance](diagrams/first-use-acceptance.mermaid)), free-model fallback | config, backends, client, openrouter_catalog |
+| `openrouter_catalog.py` | OpenRouter's public model catalog: prices, privacy status, free candidates, search, `FREE_LIMITS`, and the user-facing messages. The key is never sent here | none |
 | `client.py` | `GeminiClient`: builds the google-genai client, LRU session cache (50) and `sessions()` for `list_sessions`, model resolution, thinking translation that learns per-model rejections, 503/429 retry with backoff, `build_config()`, `ask()` | config, errors, models, tool_loop, web_tools |
 | `tool_loop.py` | `ToolRegistry`, `ToolCallRecord`, `run_tool_loop()` (up to 20 rounds, then a forced answer), `record_grounding()` for server-side web activity | errors |
 | `sandbox.py` | Path confinement: resolves every model-supplied path inside the root, applies the deny-list at any depth, walks without leaving the root | none |
@@ -51,6 +55,11 @@ Tools package: `src/sidekick/tools/`.
 | `tools/list_models.py` | `list_models`: live, chat-capable catalog for the active backend; falls back to the static shortlist | client, models, tools/base, transcript (signature only) |
 | `tools/list_sessions.py` | `list_sessions`: renders the live sessions (tool, `session_name`, model, turns), most recently used first (#15) | client, tools/base |
 | `tools/help.py` | `help`: returns one help topic or all of them from an injected render callable, so it never imports `guide.py` (#78) | none |
+
+There is no `Router` without an OpenRouter key: a Gemini-only server keeps `GeminiClient` as its
+`ModelSource`, so its behaviour, instructions and tool text are what they were before the
+OpenRouter backend existed. The `Router` is added only when a key is present, and `build_server()`
+reads its `surface` to word the instructions and help.
 
 ## Startup & setup mode
 

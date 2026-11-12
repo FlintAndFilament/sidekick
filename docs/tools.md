@@ -451,6 +451,8 @@ nothing, and is not recorded in the transcript.
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `refresh` | bool | `false` | Re-fetch the live list, bypassing the per-process cache |
+| `query` | string | none | OpenRouter only: search model ids and names (case-insensitive) |
+| `check` | string | none | OpenRouter only: one model id; shows its price and privacy status (sends one tiny routing check) |
 
 **Behavior:**
 - Fetches the live catalog via the backend's `models.list`, then keeps only models the bridge
@@ -480,6 +482,22 @@ nothing, and is not recorded in the transcript.
 ```
 list_models()
 list_models(refresh=True)   # force a fresh fetch
+list_models(query="qwen")   # OpenRouter: search the catalog
+list_models(check="x-ai/grok-4.7")   # OpenRouter: price + privacy for one model
+```
+
+With an OpenRouter key set, the output starts with an OpenRouter section (the setup picks, the
+free default, and a count of more models), then the Gemini section. Prices are USD per 1M
+tokens, input / output, live from OpenRouter with no markup:
+```
+OpenRouter models (USD per 1M tokens, input / output, from the live catalog):
+
+  <id>   $<input> / $<output>   (default)
+  <free-id>:free   free   (free default)
+  ...
+
+N more text models: pass query='...' to search ids and names, or check='<id>' for one model's
+price and privacy status (sends one tiny routing check).
 ```
 
 **Sample output** (api_key / Developer API backend; abridged — your live list reflects the
@@ -505,6 +523,22 @@ catalog (the bridge still accepts them as `model=` values and resolves them itse
 **Diagram:** [diagrams/list-models.mermaid](diagrams/list-models.mermaid) — how `list_models` fetches, filters, caches and falls back.
 
 See [configuration.md](configuration.md#choosing-a-model) for the recommended models per backend.
+
+---
+
+### OpenRouter models
+
+OpenRouter models are **conversation only**: they see the prompt and the session, not your files
+or the web, so Claude pastes the code they need. `web=true` is ignored with a notice. Tool use for
+OpenRouter models is tracked in #132. Gemini models (`flash`, `flash-lite`, `pro`, `gemini-*`)
+keep file and web access.
+
+The first call on an OpenRouter model asks a question with its price and privacy status; see
+[first-use-acceptance](diagrams/first-use-acceptance.mermaid) and
+[configuration.md](configuration.md#openrouteraccepted_models). Free (`:free`) models allow 20
+requests a minute and 50 a day (1,000 a day once you have bought at least 10 credits). On a
+terminal 429, 503 or a gated free model, the call retries once on the next free model; paid models
+never switch. Routing: [backend-routing](diagrams/backend-routing.mermaid).
 
 ---
 

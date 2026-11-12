@@ -1,0 +1,11 @@
+flowchart TD
+    S["call on OpenRouter model M"] --> AC{"M accepted or<br/>already noticed?"}
+    AC -->|yes| SEND["send"]
+    AC -->|no| PR["probe: data_collection deny<br/>(cached per process)"]
+    PR --> BL{"block_data_collection on<br/>and every provider may collect?"}
+    BL -->|yes| BLK["'Blocked by your setting block_data_collection'<br/>nothing sent"]
+    BL -->|no| EL{"elicitation"}
+    EL -->|accept| SAVE["remember in openrouter.accepted_models"] --> SEND
+    EL -->|"decline / cancel"| NS["'Not sent', nothing sent"]
+    EL -->|"unavailable + some providers don't collect"| NT["send with deny routing,<br/>one-time first-use notice"]
+    EL -->|"unavailable + all may collect / unknown"| UR["'Not sent', accept once interactively"]

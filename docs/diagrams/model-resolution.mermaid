@@ -1,5 +1,16 @@
 flowchart TD
-    A[Tool call] --> B{model= provided?}
+    A[Tool call] --> OK{OpenRouter key set?}
+    OK -->|no| B{model= provided?}
+    OK -->|yes| OM{model= provided?}
+    OM -->|"author/model"| OP[OpenRouter, id as given]
+    OM -->|"flash / flash-lite / pro / gemini-*"| B
+    OM -->|omitted| OD[configured openrouter.default_model<br/>else live free default]
+    OD --> OP
+    OP --> OE{"terminal 429 / 503 / gated<br/>on a :free model?"}
+    OE -->|no| J
+    OE -->|yes| OF[next free candidate, once]
+    OF --> J
+    OE -->|"paid model: never switches"| X
     B -->|yes| C{alias?<br/>flash / flash-lite / pro / *-latest}
     B -->|no| D{default_model set?}
     D -->|yes| C

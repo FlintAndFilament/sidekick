@@ -49,3 +49,14 @@ def test_setup_command_drives_the_cli_and_never_asks_for_the_key() -> None:
     assert "AskUserQuestion" in text
     assert "UV_PROJECT_ENVIRONMENT" in text  # same venv as the server, not a second one
     assert "never ask for the key" in text.lower()
+
+
+def test_manifest_declares_a_masked_openrouter_key_first() -> None:
+    plugin = load(".claude-plugin/plugin.json")
+    assert list(plugin["userConfig"])[0] == "openrouter_api_key"
+    option = plugin["userConfig"]["openrouter_api_key"]
+    assert option["sensitive"] is True and option.get("required", False) is False
+    assert option["title"] == "OpenRouter API key"
+    env = plugin["mcpServers"]["mcp"]["env"]
+    assert env["SIDEKICK_OPENROUTER_KEY"] == "${user_config.openrouter_api_key}"
+    assert "OPENROUTER_API_KEY" not in env  # never shadow a shell export

@@ -150,8 +150,11 @@ def _start() -> "Optional[FastMCP]":
     startup_time = _startup_time
 
     from sidekick.auth import AuthError, build_auth
+    from sidekick.backends import ModelSource
     from sidekick.client import GeminiClient
-    from sidekick.config import ConfigError, load_config
+    from sidekick.config import ConfigError, gemini_configured, load_config, openrouter_api_key
+    from sidekick.openrouter import OpenRouterClient
+    from sidekick.router import Router
     from sidekick.sandbox import SandboxError
     from sidekick.server import build_server
     from sidekick.transcript import TranscriptError, TranscriptWriter
@@ -164,30 +167,45 @@ def _start() -> "Optional[FastMCP]":
         _serve_setup_problem(str(exc))
         return None
 
-    try:
-        auth_result = build_auth(config.auth)
-    except AuthError as exc:
-        _log.error("startup failed — auth error: %s", exc)
-        _serve_setup_problem(str(exc))
-        return None
-
-    client = GeminiClient(config, credentials=auth_result.credentials, api_key=auth_result.api_key)
-    latest = client.refresh_latest()  # one models.list call; pinned defaults if it fails
-    backend = (
-        "auth=api_key"
-        if config.auth.method == "api_key"
-        else f"auth={config.auth.method} location={config.location}"
-    )
+    or_key = openrouter_api_key()
+    gemini: Optional[GeminiClient] = None
+    gemini_problem: Optional[str] = None
+    if gemini_configured(config, or_key is not None):
+        try:
+            auth_result = build_auth(config.auth)
+        except AuthError as exc:
+            if or_key is None:
+                _log.error("startup failed — auth error: %s", exc)
+                _serve_setup_problem(str(exc))
+                return None
+            gemini_problem = str(exc)
+            _log.warning("Gemini backend unavailable; serving OpenRouter only: %s", exc)
+        else:
+            gemini = GeminiClient(
+                config,
+                credentials=auth_result.credentials,
+                api_key=auth_result.api_key,
+                unpaid_tier_notice=auth_result.api_key is not None,
+            )
+            latest = gemini.refresh_latest()  # one models.list call; pinned defaults if it fails
+            _log.info(
+                "latest models: %s",
+                ", ".join(f"{family}={mid}" for family, mid in latest.items())
+                or "unresolved (pinned)",
+            )
+    source: ModelSource
+    if or_key is not None:
+        openrouter = OpenRouterClient(config, or_key)
+        openrouter.refresh_catalog()
+        source = Router(openrouter, gemini, gemini_problem)
+    else:
+        assert gemini is not None
+        source = gemini
     _log.info(
-        "starting — %s default_thinking=%s default_model=%s fallback_model=%s",
-        backend,
-        config.default_thinking,
-        client.default_model,
-        client.fallback_model,
-    )
-    _log.info(
-        "latest models: %s",
-        ", ".join(f"{family}={mid}" for family, mid in latest.items()) or "unresolved (pinned)",
+        "starting — primary=%s default_model=%s gemini=%s",
+        source.surface.primary,
+        source.default_model,
+        "on" if gemini is not None else ("unavailable" if gemini_problem else "off"),
     )
 
     root = project_root()
@@ -214,7 +232,7 @@ def _start() -> "Optional[FastMCP]":
         workspace.artifacts.directory,
     )
 
-    return build_server(client, transcript, workspace)
+    return build_server(source, transcript, workspace)
 
 
 if __name__ == "__main__":

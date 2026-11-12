@@ -1,8 +1,8 @@
 """Tests for the logging setup in __main__ (#88).
 
-Importing __main__ configures logging as a side effect and writes into $HOME, so each case
-runs in a subprocess with a throwaway HOME rather than touching the real log directory or
-leaving handlers attached to the test session's loggers.
+main() configures logging before any sidekick module is imported, and each case runs in a
+subprocess with a throwaway HOME, so the real log directory is never touched and no handlers
+are left attached to the test session's loggers.
 """
 
 import subprocess
@@ -13,7 +13,11 @@ import pytest
 
 PROBE = """
 import logging
-import sidekick.__main__  # configures logging on import
+from datetime import datetime
+
+from sidekick.__main__ import _configure_logging
+
+_configure_logging(datetime.now())  # what main() does first, before any sidekick import
 
 logging.getLogger("sidekick.probe").info("OWN_PROBE")
 logging.getLogger("httpx").warning("LIB_WARNING_PROBE")

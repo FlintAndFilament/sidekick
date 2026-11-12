@@ -33,7 +33,7 @@ from mcp.server.fastmcp import Context
 from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from sidekick.backends import Elicit, ElicitOutcome, ModelSource
+from sidekick.backends import Backend, Elicit, ElicitOutcome, ModelSource
 from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
@@ -295,6 +295,36 @@ def model_param_hint(client: ModelSource) -> str:
     return client.model_hint()
 
 
+# Re-checks allowed when concurrent calls keep re-pointing a shared default session.
+_MAX_PREFLIGHTS = 8
+_UNSTABLE_DEFAULT = (
+    "[sidekick error] The default model kept changing while sidekick was checking it (other "
+    "calls were rotating free models), so nothing was sent. Retry, or pass model= to pick one."
+)
+
+
+async def _preflight_until_stable(
+    backend: Backend, session: Session, model: str, elicit: Optional[Elicit]
+) -> tuple[Optional[str], str, list[str]]:
+    """Preflight the model `session` will actually send to: (refusal or None, model, notices).
+
+    A preflight can await a probe or the user, and meanwhile a concurrent call may re-point a
+    shared default session to another model (the free default rotated). Each new model gets
+    its own check, so nothing goes to a model that was never checked. Raises ClientError.
+    """
+    notices: list[str] = []
+    for _ in range(_MAX_PREFLIGHTS):
+        pre = await backend.preflight(model, elicit)
+        if not pre.proceed:
+            return pre.message, model, notices
+        if pre.notice:
+            notices.append(pre.notice)
+        if session.model == model:
+            return None, model, notices
+        model = session.model
+    return _UNSTABLE_DEFAULT, model, notices
+
+
 async def call_gemini(
     client: ModelSource,
     transcript: TranscriptWriter,
@@ -381,22 +411,18 @@ async def call_gemini(
         else ""
     )
 
-    notices: list[str] = []
     try:
-        pre = await backend.preflight(requested_model, elicit)
-        if pre.proceed and session.model != requested_model:
-            # A concurrent call re-pointed this shared default session while we were asking
-            # (the free default rotated); the model that will actually answer needs its own check.
-            notices.append(pre.notice)
-            requested_model = session.model
-            fallback_model = backend.fallback_for(requested_model)
-            pre = await backend.preflight(requested_model, elicit)
+        refusal, checked, notices = await _preflight_until_stable(
+            backend, session, requested_model, elicit
+        )
     except ClientError as exc:
         _log.error("%s session=%r preflight failed: %s", tool_name, session_name, exc)
         return f"[sidekick error] {exc}"
-    if not pre.proceed:
-        return pre.message
-    notices.append(pre.notice)
+    if refusal is not None:
+        return refusal
+    if checked != requested_model:
+        requested_model, fallback_model = checked, backend.fallback_for(checked)
+    # No await from here until backend.ask() reads session.model, so it sends to `checked`.
 
     async def _do_ask(use_model: Optional[str] = None) -> str:
         # The fallback answer belongs to the conversation the caller named (#122). Run it on a
@@ -448,7 +474,9 @@ async def call_gemini(
                 session=session_name,
                 tool_calls=_tool_lines(),
             )
-        return message
+        # Preflight notices are shown once (the backend has already marked them shown), so a
+        # failed call must still carry them.
+        return "".join(notices) + message
 
     fallback_notice: Optional[str] = None
     answered_by = requested_model

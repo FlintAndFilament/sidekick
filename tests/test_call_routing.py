@@ -1,22 +1,24 @@
 """call_gemini through the Router: which backend answers, what it may use, what it says."""
 
+import asyncio
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from sidekick.client import GeminiClient
+from sidekick.client import GEMINI_UNPAID_NOTICE, GeminiClient
 from sidekick.config import Config
 from sidekick.router import Router
-from sidekick.tools.base import call_gemini
+from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini
 from sidekick.transcript import TranscriptWriter
 from tests._openrouter_fixtures import FakeOpenRouter, make_client, reply
 from tests.test_capability_metadata import _workspace
-from tests.test_tools import _text_response
+from tests.test_tools import _register_all_tools, _text_response
 
 GROK, KIMI = "x-ai/grok-4.7", "moonshotai/kimi-k3.1-pro"
 NEMO, GEMMA = "nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"
+INKLING = "thinkingmachines/inkling-2-small:free"
 RATE_LIMITED = (429, {"error": {"code": 429, "message": "rate limited"}})
 
 
@@ -162,21 +164,70 @@ async def test_gemini_only_server_refuses_openrouter_model_politely(tmp_path):
 
 
 async def test_rotated_default_is_preflighted_before_send(tmp_path):
-    """A concurrent call re-points the shared default session while this one is asking."""
-    r, fake, _ = _router(tmp_path, [(200, reply("ok")), (200, reply("ok"))], accepted_models=[])
+    """Concurrent calls re-point the shared default session twice while this one is asking."""
+    r, fake, _ = _router(tmp_path, [(200, reply("ok"))] * 3 + [(200, reply())], accepted_models=[])
     asked: list[str] = []
 
     async def elicit(message: str):  # type: ignore[no-untyped-def]
         asked.append(message)
-        if len(asked) == 1:
-            # Meanwhile the default cools and another call re-points "review:s" to GEMMA.
-            r.openrouter._cooling[NEMO] = time.monotonic() + 600
-            assert r.openrouter.get_or_create_session("review:s").model == GEMMA
-            return "accept"
-        return "decline"
+        assert all(p["max_tokens"] == 16 for p in fake.posts)  # nothing but probes so far
+        if len(asked) < 3:
+            # Meanwhile the current default cools and another call re-points "review:s".
+            r.openrouter._cooling[[NEMO, GEMMA][len(asked) - 1]] = time.monotonic() + 600
+            r.openrouter.get_or_create_session("review:s")
+        return "accept"
 
     answer = await _call(r, tmp_path, elicit=elicit)
-    assert len(asked) == 2 and NEMO in asked[0] and GEMMA in asked[1]
+    assert [m for q in asked for m in (NEMO, GEMMA, INKLING) if m in q] == [NEMO, GEMMA, INKLING]
+    assert answer == "fine"
+    assert [p["model"] for p in fake.posts] == [NEMO, GEMMA, INKLING, INKLING]
+    assert [p["max_tokens"] == 16 for p in fake.posts] == [True, True, True, False]
+
+
+async def test_rotated_default_refused_sends_nothing(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply("ok"))] * 2, accepted_models=[])
+    elicit, asked = _asker("accept", "decline")
+    rotate = elicit
+
+    async def rotating(message: str):  # type: ignore[no-untyped-def]
+        r.openrouter._cooling[NEMO] = time.monotonic() + 600
+        r.openrouter.get_or_create_session("review:s")
+        return await rotate(message)
+
+    answer = await _call(r, tmp_path, elicit=rotating)
+    assert len(asked) == 2 and GEMMA in asked[1]
     assert answer.startswith("[sidekick] Not sent") and GEMMA in answer
     assert all(p["max_tokens"] == 16 for p in fake.posts)  # only the two probes went out
     assert not _transcript_written(tmp_path)
+
+
+async def test_endlessly_rotating_default_gives_up_and_sends_nothing(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply("ok"))], accepted_models=[])
+    asked: list[str] = []
+
+    async def elicit(message: str):  # type: ignore[no-untyped-def]
+        asked.append(message)
+        r.openrouter.get_or_create_session("review:s").model = f"acme/model-{len(asked)}"
+        return "accept"
+
+    answer = await _call(r, tmp_path, elicit=elicit)
+    assert answer.startswith("[sidekick error]") and "nothing was sent" in answer
+    assert len(asked) == _MAX_PREFLIGHTS
+    assert fake.posts and all(p["max_tokens"] == 16 for p in fake.posts)
+    assert not _transcript_written(tmp_path)
+
+
+async def test_gemini_unpaid_notice_survives_a_failed_call(tmp_path):
+    with patch("google.genai.Client"):
+        g = GeminiClient(Config(auth={"method": "api_key"}), api_key="k", unpaid_tier_notice=True)
+    g._raw_client.aio.models.generate_content = AsyncMock(side_effect=Exception("API down"))
+    answer = await _call(g, tmp_path)
+    assert answer.startswith(GEMINI_UNPAID_NOTICE + "[sidekick error]")
+
+
+def test_injected_context_is_not_a_tool_parameter(tmp_path):
+    mcp = _register_all_tools(tmp_path)
+    tools = asyncio.run(mcp.list_tools())  # type: ignore[attr-defined]
+    assert len(tools) == 5
+    for tool in tools:
+        assert "ctx" not in tool.inputSchema["properties"], tool.name

@@ -69,7 +69,7 @@ def _sentence(names: Sequence[str]) -> str:
 def _brief(summary: str) -> str:
     """A tool's first sentence without the shared lead-in: 'Ask Gemini to review X.' -> 'review X.'"""
     first = summary.split(". ", 1)[0].rstrip(".") + "."
-    return re.sub(r"^Ask Gemini (to |for )?", "", first)
+    return re.sub(r"^Ask (?:Gemini|the sidekick model) (?:to |for )?", "", first)
 
 
 def _writes_possible(workspace: Optional[Workspace]) -> bool:

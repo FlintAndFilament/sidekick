@@ -54,7 +54,7 @@ _ARTIFACTS: ArtifactMode = "default"
 
 # Advertised to the MCP client; capability_hint() appends the file-tool row (#74).
 _DESCRIPTION = (
-    "Ask Gemini to evaluate a system design or architecture. Gemini will be opinionated "
+    "Ask the sidekick model to evaluate a system design or architecture. It will be opinionated "
     "where warranted and name tradeoffs explicitly when choices are context-dependent."
 )
 
@@ -83,6 +83,8 @@ def register(
             artifacts=_ARTIFACTS,
             web_default=client.web_default,
             web_supported=client.web_supported,
+            default_backend=client.surface.primary,
+            gemini_available=client.surface.gemini_available,
         ),
         annotations=tool_annotations(workspace, write=_WRITE),
     )
@@ -109,9 +111,9 @@ def register(
             Optional[bool],
             Field(
                 description=(
-                    "Let Gemini search the web and fetch URLs for this call. Omit to use the "
+                    "Let the model search the web (Gemini models only; ignored with a notice on OpenRouter) and fetch URLs for this call. Omit to use the "
                     "server default. Retrieved pages are untrusted text, so while web "
-                    "access is on write_file is withheld and Gemini cannot modify the "
+                    "access is on write_file is withheld and the model cannot modify the "
                     "working tree."
                 )
             ),

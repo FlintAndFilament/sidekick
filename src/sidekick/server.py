@@ -91,7 +91,7 @@ def setup_needed_text(problem: str) -> str:
             + "\n… (truncated; the full message is in ~/.config/sidekick/logs/)"
         )
     return (
-        "sidekick is installed but not set up yet, so its Gemini tools are unavailable.\n\n"
+        "sidekick is installed but not set up yet, so its tools are unavailable.\n\n"
         f"Problem:\n{problem}\n\n"
         "Tell the user this in one or two lines and offer to run /sidekick:setup. After they fix "
         "it, they run /reload-plugins (or /mcp → plugin:sidekick:mcp → Reconnect)."
@@ -108,7 +108,7 @@ def build_setup_server(problem: str) -> FastMCP:
 
     @mcp.tool(
         name="setup_status",
-        description="Why sidekick's Gemini tools are unavailable and how to fix it.",
+        description="Why sidekick's tools are unavailable and how to fix it.",
     )
     def setup_status() -> str:
         return text

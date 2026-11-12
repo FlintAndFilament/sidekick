@@ -160,6 +160,11 @@ _ARTIFACT_CLAUSE: dict[ArtifactMode, str] = {
 }
 
 
+_OPENROUTER_WEB = (
+    "\n\nWeb access: none for OpenRouter models; web=true is ignored and the reply says so."
+)
+
+
 def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str:
     """The web row for a tool description (#76).
 
@@ -189,6 +194,30 @@ def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str
     return note
 
 
+def _openrouter_hint(
+    workspace: Optional[Workspace],
+    write: bool,
+    artifacts: ArtifactMode,
+    gemini_available: bool,
+    disk: str,
+) -> str:
+    """The capability row when the default model runs on OpenRouter: conversation only."""
+    hint = (
+        "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
+        "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
+        "nothing else. Include the code or context you want considered directly in this call."
+    )
+    if gemini_available and workspace is not None and workspace.tools_enabled:
+        hint += (
+            " Passing model=flash, flash-lite, pro or a gemini-* id runs the call on Gemini "
+            "instead, which reads this repository itself"
+        )
+        if write:
+            hint += f" and may create or overwrite files there with {WRITE_TOOL_NAME}"
+        hint += "."
+    return hint + disk + _ARTIFACT_CLAUSE[artifacts] + _OPENROUTER_WEB
+
+
 def capability_hint(
     workspace: Optional[Workspace],
     *,
@@ -196,6 +225,8 @@ def capability_hint(
     artifacts: ArtifactMode = "never",
     web_default: bool = False,
     web_supported: bool = True,
+    default_backend: Literal["gemini", "openrouter"] = "gemini",
+    gemini_available: bool = False,
 ) -> str:
     """Client-facing sentence describing what this tool can read and what it writes (#74).
 
@@ -207,6 +238,8 @@ def capability_hint(
     tools are switched off, so the hint never claims the call leaves the tree untouched.
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
+    if default_backend == "openrouter":
+        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk)
     # Only claim write_file is withheld where it would otherwise have been offered:
     # with file tools off, it does not exist and mentioning it would mislead.
     web_note = _web_note(
@@ -264,7 +297,7 @@ def tool_annotations(workspace: Optional[Workspace], *, write: bool) -> ToolAnno
 # it cannot drift per tool again — ask's copy had said "v1: always 'default'" long
 # after session names started working.
 _SESSION_BASE = (
-    "Named conversation to continue. Calls that share a name continue one Gemini conversation; "
+    "Named conversation to continue. Calls that share a name continue one conversation; "
     "a new name starts fresh. Sessions are separate per tool and per model, live in memory "
     f"until the server restarts, and the least recently used is dropped past {MAX_SESSIONS}."
 )

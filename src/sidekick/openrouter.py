@@ -95,6 +95,10 @@ class ChatMessage:
     content: str
 
 
+# Raised before the request reaches OpenRouter, so a retry cannot double-bill.
+_SAFE_RETRY_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
 class OpenRouterError(ClientError):
     """An OpenRouter failure, with the HTTP status and routing step when the API gave them."""
 
@@ -433,7 +437,9 @@ class OpenRouterClient:
             try:
                 resp = await self._http.post("/chat/completions", json=body)
             except httpx.TransportError as exc:
-                if is_last:
+                # Only errors raised before the request left are safe to resend: a read or
+                # write timeout may already have been billed (a paid call up to 4x).
+                if is_last or not isinstance(exc, _SAFE_RETRY_ERRORS):
                     raise OpenRouterError(
                         f"Could not reach OpenRouter ({type(exc).__name__})."
                     ) from exc

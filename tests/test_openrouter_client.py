@@ -181,3 +181,19 @@ async def test_key_never_logged(tmp_path, caplog):
     with pytest.raises(OpenRouterError):
         await c.ask(c.get_or_create_session("a", GROK), "q")
     assert FAKE_OPENROUTER_KEY not in caplog.text
+
+
+async def test_read_timeout_is_not_retried_so_a_paid_call_bills_once(tmp_path):
+    exc = httpx.ReadTimeout("slow")
+    fake = FakeOpenRouter(replies=[(0, exc), (200, reply())])
+    c = make_client(fake, tmp_path)
+    with pytest.raises(OpenRouterError, match="Could not reach OpenRouter"):
+        await c.ask(c.get_or_create_session("a", GROK), "q")
+    assert len(fake.posts) == 1
+
+
+async def test_connect_error_is_still_retried(tmp_path):
+    fake = FakeOpenRouter(replies=[(0, httpx.ConnectError("boom")), (200, reply())])
+    c = make_client(fake, tmp_path)
+    await c.ask(c.get_or_create_session("a", GROK), "q")
+    assert len(fake.posts) == 2

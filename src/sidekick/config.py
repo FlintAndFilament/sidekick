@@ -23,11 +23,19 @@ Imports:  sandbox.py (DEFAULT_DENY — stdlib-only module), pydantic
 
 import json
 import os
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, ValidationInfo, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from sidekick.sandbox import DEFAULT_DENY
 
@@ -91,6 +99,11 @@ class WebToolsConfig(BaseModel):
     enabled: bool = False  # the default answer for a call's `web` argument
 
 
+# An OpenRouter author/model id. Shared with setup so a key pasted where an id belongs is
+# rejected everywhere before it can reach a log line or a tool description.
+OPENROUTER_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*/[A-Za-z0-9._:~-]{1,120}$")
+
+
 class OpenRouterConfig(BaseModel):
     """The OpenRouter backend. Holds no key: keys come from the environment only."""
 
@@ -99,6 +112,16 @@ class OpenRouterConfig(BaseModel):
     accepted_models: list[str] = Field(default_factory=list)
     # true = send provider.data_collection="deny" on every request.
     block_data_collection: bool = False
+
+    @field_validator("default_model", "accepted_models")
+    @classmethod
+    def _ids_look_like_model_ids(cls, value: object) -> object:
+        ids = [value] if isinstance(value, str) else (value or [])
+        for item in ids:  # type: ignore[attr-defined]
+            if not isinstance(item, str) or not OPENROUTER_ID.match(item):
+                # Never echo the value: it may be a pasted key.
+                raise ValueError("must be OpenRouter model ids shaped like author/model")
+        return value
 
 
 class Config(BaseModel):
@@ -187,6 +210,15 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             raw = {**raw, "auth": {**(auth if isinstance(auth, dict) else {}), "method": "api_key"}}
     try:
         return Config.model_validate(raw, context=ctx)
+    except ValidationError as exc:
+        # Built from loc + msg only: pydantic's own text echoes input values, which could be a key.
+        detail = "\n".join(
+            f"{'.'.join(str(p) for p in e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
+            for e in exc.errors(include_input=False)
+        )
+        raise ConfigError(
+            f"Config validation failed: {len(exc.errors())} validation errors\n{detail}"
+        ) from None
     except Exception as exc:
         raise ConfigError(f"Config validation failed: {exc}") from exc
 

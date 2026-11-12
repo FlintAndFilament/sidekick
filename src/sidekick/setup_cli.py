@@ -32,6 +32,7 @@ from sidekick.auth import AuthError, _load_keychain, _looks_like_api_key
 from sidekick.config import (
     CONFIG_PATH,
     OPENROUTER_ENV_VAR,
+    OPENROUTER_ID,
     AuthConfig,
     Config,
     OpenRouterConfig,
@@ -49,7 +50,7 @@ DEFAULTS: dict[str, Any] = {
     "api_key_env": "GEMINI_API_KEY",
 }
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
-_OPENROUTER_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*/[A-Za-z0-9._:~-]{1,120}$")
+_OPENROUTER_ID = OPENROUTER_ID
 
 
 class SetupError(Exception):

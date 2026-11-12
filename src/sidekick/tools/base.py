@@ -30,7 +30,7 @@ from typing import Literal, Optional
 
 from mcp.types import ToolAnnotations
 
-from sidekick import models
+from sidekick.backends import ModelSource
 from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
@@ -254,16 +254,13 @@ def session_param_hint(workspace: Optional[Workspace], *, write: bool) -> str:
     return _SESSION_BASE
 
 
-def model_param_hint(client: GeminiClient) -> str:
+def model_param_hint(client: ModelSource) -> str:
     """Backend-aware description for the `model` param, computed once at tool registration.
 
-    api_key mode surfaces the Developer-API shortlist (incl. '-latest' aliases); Vertex
-    modes surface the alias-free Vertex shortlist. Injected into each tool's Annotated[...]
-    so the hint can never contradict the active backend.
+    Injected into each tool's Annotated[...] so the hint can never contradict the active
+    backend; the client owns the wording.
     """
-    return models.schema_hint(
-        models.backend_for(client.auth_method), client.default_model, client.resolved_latest
-    )
+    return client.model_hint()
 
 
 async def call_gemini(

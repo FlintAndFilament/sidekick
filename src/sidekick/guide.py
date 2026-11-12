@@ -395,6 +395,18 @@ def _tools_topic() -> str:
     return "\n".join(lines)
 
 
+_GEMINI_UNPAID = (
+    "Gemini: if a Gemini API key's Cloud project has no billing (the unpaid tier), Google may "
+    "use prompts and responses to improve its products."
+)
+
+_GEMINI_MODELS_TOPIC = (
+    "Models. flash, flash-lite, pro and gemini-* ids go to Gemini; aliases flash, flash-lite "
+    "and pro always track the newest release. With no model=, the server's Gemini default is "
+    "used; list_models shows it. OpenRouter model ids need an OpenRouter key; run "
+    "/sidekick:setup.\n\n" + _GEMINI_UNPAID
+)
+
 _MODELS_TOPIC = (
     "Models. Routing: an author/model id (for example moonshotai/kimi-k3.1-pro) goes to "
     "OpenRouter. flash, flash-lite, pro and gemini-* go to Gemini when it is configured, "
@@ -412,9 +424,8 @@ _MODELS_TOPIC = (
     + FREE_LIMITS
     + " OpenRouter screens all requests for abuse and keeps flagged content (since "
     "2026-10-27); this happens whatever sidekick's settings are.\n\n"
-    "Gemini: if a Gemini API key's Cloud project has no billing (the unpaid tier), Google may "
-    "use prompts and responses to improve its products. block_data_collection does not apply "
-    "to Gemini."
+    + _GEMINI_UNPAID
+    + " block_data_collection does not apply to Gemini."
 )
 
 
@@ -435,7 +446,7 @@ def help_text(
         "web": _web_topic(workspace, web_default, web_supported, surface),
         "sessions": _sessions_topic(workspace),
         "disk": _disk_topic(transcript_path, workspace),
-        "models": _MODELS_TOPIC,
+        "models": _MODELS_TOPIC if _openrouter(surface) else _GEMINI_MODELS_TOPIC,
     }
     for cap in CAPABILITIES:
         sections[cap.name] = f"{cap.name}: {cap.summary}" + capability_hint(

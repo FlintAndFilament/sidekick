@@ -152,6 +152,15 @@ class TestOpenRouterSurface:
         ):
             assert needle in text, needle
 
+    def test_models_topic_on_a_gemini_only_server_does_not_promise_openrouter(
+        self, tmp_path: Path
+    ) -> None:
+        for surface in (None, Surface("gemini", True, True, False, True)):
+            text = help_text(_workspace(tmp_path), topic="models", surface=surface)
+            assert "need an OpenRouter key" in text and "/sidekick:setup" in text
+            assert "unpaid tier" in text and "flash-lite" in text
+            assert "openrouter.default_model" not in text and "goes to OpenRouter" not in text
+
     def test_models_is_a_help_topic(self) -> None:
         assert "models" in HELP_TOPICS
 

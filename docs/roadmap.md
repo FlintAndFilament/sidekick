@@ -221,13 +221,31 @@ Also in `v0.5.0`:
   file is a service-account key, passes it to `security` on stdin (never argv, never the
   chat), reads it back to prove it works, and can delete the file afterwards (#123).
 
+### OpenRouter backend (#133) — 0.6.0
+
+- OpenRouter is the default backend when an OpenRouter key is set (masked plugin option, or a
+  shell `OPENROUTER_API_KEY`). The Gemini API and Agent Platform stay as the second source and
+  work exactly as before without the key. Model ids shaped `author/model` go to OpenRouter;
+  Gemini ids and the `flash` / `flash-lite` / `pro` aliases go to Gemini.
+- OpenRouter models are conversation only: they see the prompt Claude sends, not your files or
+  the web (tool use is #132).
+- Prices come live from OpenRouter's catalog. The first use of a model asks once, showing its
+  price and whether its providers may store or train on prompts; accepted models are remembered.
+- Privacy: allowed by default with a clear warning. `openrouter.block_data_collection: true`
+  routes every request only to providers that don't collect data, and every block says it came
+  from that setting. Without anyone to ask (unattended runs), a model is used only with
+  privacy-only routing, or refused.
+- With no model picked, sidekick uses a free model and switches to another free one when it is
+  busy or limited to agent apps; paid models never switch. A one-time notice warns that Gemini
+  free-tier API keys let Google use prompts.
+- `list_models` shows prices, privacy markers, search (`query=`) and a privacy check (`check=`).
+  `/sidekick:setup` leads with OpenRouter.
+
 ---
 
 ## Open
 
-### OpenRouter backend (#133)
-
-On `develop`, not yet promoted. Tool use for OpenRouter models is #132.
+Tool use for OpenRouter models (#132).
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 

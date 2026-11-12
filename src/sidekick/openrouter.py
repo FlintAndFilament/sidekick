@@ -149,7 +149,7 @@ class OpenRouterClient:
         self._catalog: list[ORModel] = []
         self._catalog_loaded = False
         self._sessions: OrderedDict[str, Session] = OrderedDict()
-        self._privacy: dict[str, PrivacyStatus] = {}
+        self._privacy: dict[str, tuple[PrivacyStatus, Optional[float]]] = {}
         self._deny_models: set[str] = set()
         self._gated: set[str] = set()
         self._cooling: dict[str, float] = {}
@@ -228,11 +228,23 @@ class OpenRouterClient:
         return isinstance(exc, OpenRouterError) and (exc.status in (429, 503) or exc.gated)
 
     def cached_privacy(self, model: str) -> Optional[PrivacyStatus]:
-        return self._privacy.get(model)
+        entry = self._privacy.get(model)
+        if entry is None:
+            return None
+        status, expires = entry
+        if expires is not None and expires <= self._clock():
+            return None
+        return status
 
     async def privacy_status(self, model: str) -> PrivacyStatus:
-        """Probe whether any provider for `model` may collect data (one tiny deny-request)."""
-        cached = self._privacy.get(model)
+        """Probe whether any provider for `model` may collect data (one tiny deny-request).
+
+        Caveat: a 404 "Filter by Data Policy" under deny is read as ALL_MAY_COLLECT, but it can
+        also reflect the account's own provider restrictions (deny intersected with the account's
+        allowed set is empty). Definite answers are cached for the process; UNKNOWN only for
+        FREE_COOLDOWN_SECONDS, so a transient failure does not block a model for good.
+        """
+        cached = self.cached_privacy(model)
         if cached is not None:
             return cached
         body: dict[str, Any] = {
@@ -248,9 +260,8 @@ class OpenRouterClient:
             if exc.status in (401, 402):
                 raise
             status = PrivacyStatus.ALL_MAY_COLLECT if exc.data_policy else PrivacyStatus.UNKNOWN
-        except ClientError:
-            status = PrivacyStatus.UNKNOWN
-        self._privacy[model] = status
+        expires = self._clock() + FREE_COOLDOWN_SECONDS if status is PrivacyStatus.UNKNOWN else None
+        self._privacy[model] = (status, expires)
         return status
 
     def resolve_model(self, model: Optional[str]) -> str:
@@ -332,7 +343,7 @@ class OpenRouterClient:
             if is_free(model):
                 if exc.gated:
                     self._gated.add(model)
-                elif exc.status == 429:
+                elif exc.status in (429, 503):
                     self._cooling[model] = self._clock() + FREE_COOLDOWN_SECONDS
             raise
 

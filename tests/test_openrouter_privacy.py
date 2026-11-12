@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from sidekick.client import ClientError
@@ -125,3 +126,49 @@ async def test_all_free_candidates_unavailable_uses_the_pin(tmp_path):
         with pytest.raises(OpenRouterError):
             await c.ask(c.get_or_create_session("a", model), "q")
     assert c.free_candidates == [] and c.default_model == PINNED_FREE_MODEL
+
+
+async def test_unknown_probe_expires_and_reprobes(tmp_path):
+    now = [1000.0]
+    fake = FakeOpenRouter(replies=[(500, {"error": {"code": 500, "message": "x"}}), (200, reply())])
+    c = make_client(fake, tmp_path, clock=lambda: now[0])
+    assert await c.privacy_status(GROK) is PrivacyStatus.UNKNOWN
+    assert await c.privacy_status(GROK) is PrivacyStatus.UNKNOWN
+    assert len(fake.posts) == 1
+    now[0] += 601
+    assert c.cached_privacy(GROK) is None
+    assert await c.privacy_status(GROK) is PrivacyStatus.SOME_MAY_COLLECT
+    assert len(fake.posts) == 2
+    now[0] += 10_000
+    assert c.cached_privacy(GROK) is PrivacyStatus.SOME_MAY_COLLECT
+
+
+async def test_probe_transport_error_is_unknown(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, httpx.ConnectError("boom"))])
+    assert await make_client(fake, tmp_path).privacy_status(GROK) is PrivacyStatus.UNKNOWN
+
+
+async def test_block_switch_denies_on_every_retry(tmp_path):
+    fake = FakeOpenRouter(replies=[SLOW, (200, reply())])
+    c = make_client(fake, tmp_path, block_data_collection=True)
+    await c.ask(c.get_or_create_session("a", GROK), "q")
+    assert len(fake.posts) == 2
+    assert all(p["provider"] == {"data_collection": "deny"} for p in fake.posts)
+
+
+async def test_forced_deny_model_denies_on_every_retry(tmp_path):
+    fake = FakeOpenRouter(replies=[SLOW, (200, reply())])
+    c = make_client(fake, tmp_path)
+    c._deny_models.add(GROK)
+    await c.ask(c.get_or_create_session("a", GROK), "q")
+    assert len(fake.posts) == 2
+    assert all(p["provider"] == {"data_collection": "deny"} for p in fake.posts)
+
+
+async def test_unavailable_free_model_cools_down(tmp_path):
+    c = make_client(
+        FakeOpenRouter(replies=[(503, {"error": {"code": 503, "message": "x"}})]), tmp_path
+    )
+    with pytest.raises(OpenRouterError):
+        await c.ask(c.get_or_create_session("a", NEMO), "q")
+    assert c.default_model == GEMMA

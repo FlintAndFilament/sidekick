@@ -14,15 +14,15 @@ Design notes:
   - System prompt: evidence-based, not speculative — generates hypotheses from what's shown
 
 Used by:  tools/__init__.py -> register_debug(), server.py (via tools/__init__)
-Imports:  tools/base.py (call_gemini), client.py (GeminiClient), transcript.py (TranscriptWriter)
+Imports:  tools/base.py (call_gemini), backends.py (ModelSource), transcript.py (TranscriptWriter)
 """
 
 from typing import Annotated, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.config import ThinkingLevel
 from sidekick.tools.base import (
     ArtifactMode,
@@ -30,6 +30,7 @@ from sidekick.tools.base import (
     ToolResult,
     call_gemini,
     capability_hint,
+    elicitor,
     model_param_hint,
     session_param_hint,
     tool_annotations,
@@ -66,7 +67,7 @@ CAPABILITY = ToolCapability(
 
 def register(
     mcp: FastMCP,
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> None:
@@ -85,6 +86,7 @@ def register(
         annotations=tool_annotations(workspace, write=_WRITE),
     )
     async def debug(
+        ctx: Context,  # type: ignore[type-arg]
         error: Annotated[
             str, Field(description="The error message, stack trace, or failure description")
         ],
@@ -128,4 +130,5 @@ def register(
             workspace=workspace,
             write=_WRITE,
             web=web,
+            elicit=elicitor(ctx),
         )

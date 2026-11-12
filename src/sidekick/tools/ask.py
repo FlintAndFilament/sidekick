@@ -14,16 +14,16 @@ Design notes:
   - System prompt: direct, precise, concrete — no specialized persona
 
 Used by:  tools/__init__.py -> register_ask(), server.py (via tools/__init__)
-Imports:  tools/base.py (call_gemini, ThinkingParam), client.py (GeminiClient),
+Imports:  tools/base.py (call_gemini, ThinkingParam), backends.py (ModelSource),
           transcript.py (TranscriptWriter)
 """
 
 from typing import Annotated, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.config import ThinkingLevel
 from sidekick.tools.base import (
     ArtifactMode,
@@ -31,6 +31,7 @@ from sidekick.tools.base import (
     ToolResult,
     call_gemini,
     capability_hint,
+    elicitor,
     model_param_hint,
     session_param_hint,
     tool_annotations,
@@ -63,7 +64,7 @@ CAPABILITY = ToolCapability(
 
 def register(
     mcp: FastMCP,
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> None:
@@ -82,6 +83,7 @@ def register(
         annotations=tool_annotations(workspace, write=_WRITE),
     )
     async def ask(
+        ctx: Context,  # type: ignore[type-arg]
         prompt: Annotated[str, Field(description="The question or request to send to Gemini")],
         thinking: Annotated[
             Optional[ThinkingLevel],
@@ -117,4 +119,5 @@ def register(
             workspace=workspace,
             write=_WRITE,
             web=web,
+            elicit=elicitor(ctx),
         )

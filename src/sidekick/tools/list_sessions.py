@@ -9,19 +9,20 @@ Responsibilities:
 
 Design notes:
   - Single Responsibility: formatting only; the session cache and its LRU order live in
-    client.py, read through GeminiClient.sessions()
+    each backend, read through ModelSource.sessions()
   - No API call, no transcript, no artifact: it reads process memory and writes nothing
   - There is no new_session tool: a new session_name already starts a fresh conversation,
     and every generating tool's session_name description says so
 
 Used by:  tools/__init__.py -> register_list_sessions(), server.py
-Imports:  client.py (GeminiClient, Session, MAX_SESSIONS), tools/base.py (ToolResult)
+Imports:  backends.py (ModelSource, Session), client.py (MAX_SESSIONS), tools/base.py (ToolResult)
 """
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from sidekick.client import MAX_SESSIONS, GeminiClient, Session
+from sidekick.backends import ModelSource, Session
+from sidekick.client import MAX_SESSIONS
 from sidekick.tools.base import ToolResult
 
 _TOOL_NAME = "list_sessions"
@@ -31,7 +32,7 @@ _HEADER = ("tool", "session_name", "model", "turns")
 
 
 def _turns(session: Session) -> int:
-    """Committed exchanges: GeminiClient.ask stores one user prompt per successful call."""
+    """Committed exchanges: each backend's ask() stores one user prompt per successful call."""
     return sum(1 for content in session.history if content.role == "user")
 
 
@@ -63,7 +64,7 @@ def format_session_list(sessions: list[Session]) -> str:
     return "\n".join(lines)
 
 
-def register(mcp: FastMCP, client: GeminiClient) -> None:
+def register(mcp: FastMCP, client: ModelSource) -> None:
     """Register list_sessions with the MCP server."""
 
     @mcp.tool(

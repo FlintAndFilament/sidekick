@@ -5,7 +5,7 @@ MCP server construction and tool registration.
 
 Responsibilities:
   - Build the FastMCP server instance
-  - Accept pre-constructed GeminiClient, TranscriptWriter, and Workspace (injected by __main__.py)
+  - Accept a pre-constructed ModelSource, TranscriptWriter, and Workspace (injected by __main__.py)
   - Register all 8 tools by calling each tool module's register() function
   - Send the short instructions from guide.py and wire help to its full detail (#74, #78)
   - Return the configured server instance for running
@@ -13,13 +13,13 @@ Responsibilities:
 Design notes:
   - Single Responsibility: server wiring only; no config loading, no credential logic
   - Open/Closed: add a new tool by importing its register() + one function call — nothing else changes
-  - Dependency Inversion: depends on GeminiClient and TranscriptWriter abstractions, not concrete init
+  - Dependency Inversion: depends on the ModelSource and TranscriptWriter abstractions, not concrete init
 
 Raises:
   (none) — startup errors surface from __main__.py where they are caught and reported
 
 Used by:  __main__.py -> build_server()
-Imports:  client.py (GeminiClient), guide.py, transcript.py (TranscriptWriter),
+Imports:  backends.py (ModelSource), guide.py, transcript.py (TranscriptWriter),
           tools/__init__.py, workspace.py (Workspace)
 """
 
@@ -27,7 +27,7 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from sidekick.client import GeminiClient
+from sidekick.backends import ModelSource
 from sidekick.guide import HELP_TOPICS, help_text, server_instructions
 from sidekick.tools import (
     register_architect,
@@ -48,7 +48,7 @@ _SERVER_NAME = "sidekick"
 
 
 def build_server(
-    client: GeminiClient,
+    client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
 ) -> FastMCP:

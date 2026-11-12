@@ -113,6 +113,12 @@ GEMINI_UNPAID_NOTICE = (
     "to Gemini.\n\n"
 )
 
+_NO_OPENROUTER_KEY = (
+    "`{model}` is an OpenRouter model id, but no OpenRouter key is set. Fix: run /plugin "
+    "configure sidekick@sidekick, paste your key on the OpenRouter API key row, press Enter, "
+    "then run /reload-plugins."
+)
+
 MAX_SESSIONS = 50  # LRU cap; oldest session evicted when exceeded
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 1.0  # seconds; doubles each attempt plus jitter
@@ -247,6 +253,9 @@ class GeminiClient:
         return True
 
     def backend_for(self, model: Optional[str]) -> "GeminiClient":
+        """This client, unless `model` is an OpenRouter id this Gemini-only server cannot run."""
+        if model and models.is_openrouter_id(model):
+            raise ClientError(_NO_OPENROUTER_KEY.format(model=model))
         return self
 
     def backends(self) -> list["GeminiClient"]:

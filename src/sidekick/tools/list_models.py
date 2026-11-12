@@ -27,6 +27,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from sidekick import models
+from sidekick.backends import ModelSource
 from sidekick.client import ClientError, GeminiClient
 from sidekick.tools.base import ToolResult
 from sidekick.transcript import TranscriptWriter
@@ -132,13 +133,18 @@ def render_model_list(client: GeminiClient, backend: str) -> str:
     return format_model_list(raw, backend, client.default_model, client.resolved_latest)
 
 
-def register(mcp: FastMCP, client: GeminiClient, transcript: TranscriptWriter) -> None:
+_NO_GEMINI = "[sidekick notice] No Gemini backend is configured on this server."
+
+
+def register(mcp: FastMCP, client: ModelSource, transcript: TranscriptWriter) -> None:
     """Register list_models with the MCP server.
 
-    `transcript` is accepted for registration-signature parity with the other tools but is
-    unused — this is a metadata call, not an inference, so it is not logged to transcripts.
+    Lists the Gemini backend's models (found among client.backends()). `transcript` is accepted
+    for registration-signature parity with the other tools but is unused — this is a metadata
+    call, not an inference, so it is not logged to transcripts.
     """
-    backend = models.backend_for(client.auth_method)
+    gemini = next((b for b in client.backends() if isinstance(b, GeminiClient)), None)
+    backend = models.backend_for(gemini.auth_method) if gemini is not None else ""
     cache: dict[str, str] = {}
 
     @mcp.tool(
@@ -167,8 +173,10 @@ def register(mcp: FastMCP, client: GeminiClient, transcript: TranscriptWriter) -
         valid values for the `model=` parameter accepted by every sidekick tool. Falls back to
         a curated shortlist if the live catalog cannot be fetched.
         """
+        if gemini is None:
+            return _NO_GEMINI
         if refresh or "text" not in cache:
-            text = render_model_list(client, backend)
+            text = render_model_list(gemini, backend)
             # Only cache authoritative live results; a degraded fallback should retry next call.
             if not text.startswith("[sidekick notice]"):
                 cache["text"] = text

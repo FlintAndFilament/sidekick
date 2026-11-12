@@ -4,7 +4,8 @@ sidekick/__main__.py
 Entry point: python -m sidekick
 
 Responsibilities:
-  - Configure structured logging (file + stderr) before any other import runs
+  - Configure structured logging (file + stderr) in main(), before any sidekick module import
+    there (#136: importing this module must not write into the real log directory)
   - Load config from ~/.config/sidekick/config.json
   - Build credentials via auth.build_auth()
   - Instantiate GeminiClient and TranscriptWriter
@@ -14,7 +15,8 @@ Responsibilities:
 Design notes:
   - Single Responsibility: startup orchestration only; all logic lives in imported modules
   - Dependency Inversion: passes ready-made Config, Credentials, Client, Transcript to server
-  - Logging is configured first so all downstream modules inherit the handler/formatter
+  - Logging is configured first in main() so all downstream modules inherit the handler/formatter;
+    every sidekick import in _start()/_serve_setup_problem is lazy and runs after it
 
 Log files:
   ~/.config/sidekick/logs/YYYYMMDD-sidekick.log
@@ -115,7 +117,6 @@ def _configure_logging(startup_time: datetime) -> None:
 
 
 _startup_time = datetime.now()
-_configure_logging(_startup_time)
 
 # Use explicit package path — __name__ is "__main__" when run via python3 -m sidekick,
 # which is not a child of "sidekick" and would bypass our file handler.
@@ -129,6 +130,10 @@ def _serve_setup_problem(problem: str) -> None:
 
 
 def main() -> None:
+    # In main(), not at import: importing this module (tests, tooling) must not create, prune
+    # or write the real log directory (#136). Every sidekick import below is lazy, so the
+    # handlers are still in place before any module that calls getLogger() is imported.
+    _configure_logging(_startup_time)
     try:
         server = _start()
     except Exception as exc:  # noqa: BLE001 - last resort: never leave only "Connection closed"

@@ -96,8 +96,9 @@ instead of a second one:
       `list_models(refresh=true)`. Setup is complete when the chosen id shows
       `(default)`. A `[sidekick error]` from sub-step 3 that mentions the API
       key means the key is wrong: go back to sub-step 1.
-   To accept another model for unattended use later:
-   `sidekick-setup openrouter --accept '<id>'`.
+   To accept another model for unattended use later: first run
+   `list_models(check='<id>')`, show the user the price and privacy sentence, and
+   only on their OK run `sidekick-setup openrouter --accept '<id>'`.
    Path O skips steps 5 to 7 below.
 
    **A. Keychain.** Tell the user, in these words: "Run

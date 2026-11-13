@@ -42,7 +42,7 @@ from sidekick.config import (
     ConfigError,
     ThinkingLevel,
     remember_accepted_model,
-    remember_repo_notice_shown,
+    remember_repo_access,
 )
 from sidekick.errors import ClientError
 from sidekick.openai_tool_loop import run_openai_tool_loop
@@ -61,7 +61,9 @@ from sidekick.openrouter_catalog import (
     is_free,
     map_effort,
     parse_catalog,
+    repo_access_question,
     resolve_gemini_alias,
+    unattended_paid_refused_message,
     unattended_refused_message,
 )
 
@@ -80,11 +82,6 @@ ATTRIBUTION_HEADERS = {
 FREE_MAX_RETRIES = 1
 FREE_COOLDOWN_SECONDS = 600.0
 PROBE_MAX_TOKENS = 16
-_REPO_NOTICE = (
-    "[sidekick notice] This reply read repository files through OpenRouter: files the model "
-    "reads are sent to the provider serving it, subject to that provider's privacy status "
-    "(list_models check=<id>). Shown once.\n\n"
-)
 _DENY = {"data_collection": "deny"}
 _RETRY_STATUSES = frozenset({429, 502, 503})
 _REQUIRE_PARAMETERS = "require_parameters"
@@ -212,7 +209,8 @@ class OpenRouterClient:
         self._deny_models: set[str] = set()
         self._accepted: set[str] = set(config.openrouter.accepted_models)
         self._notified: set[str] = set()
-        self._repo_notice_shown = False
+        self._repo_access: set[str] = set(config.openrouter.repo_access_models)
+        self._repo_declined: set[str] = set()  # asked and declined: not asked again this process
         self._gated: set[str] = set()
         self._cooling: dict[str, float] = {}
 
@@ -340,10 +338,19 @@ class OpenRouterClient:
         self._privacy[model] = (status, expires)
         return status
 
-    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight:
-        """First-use price and privacy check for `model`; 401/402 from the probe propagate."""
+    async def preflight(
+        self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
+    ) -> Preflight:
+        """First-use price and privacy check for `model`, then (with `want_tools`) a separate
+        repository question. Fails closed when sidekick can't ask (`elicit` is None): nothing
+        is sent for a paid model, not even the billed probe. 401/402 from the probe propagate.
+
+        `tools` in the result is True only when the user has let `model` read repository files;
+        `tools_reason` says why not when the call wanted them."""
         if model in self._accepted or model in self._notified:
-            return Preflight(True)
+            return await self._with_repo_consent(model, elicit, want_tools)
+        if elicit is None and not is_free(model):  # even the probe is billed: send nothing (#141)
+            return Preflight(False, message=unattended_paid_refused_message(model))
         status = await self.privacy_status(model)
         block = self._config.openrouter.block_data_collection
         if block and status is PrivacyStatus.ALL_MAY_COLLECT:
@@ -351,55 +358,73 @@ class OpenRouterClient:
                 False, message=f"[sidekick] {blocked_message(model)} Nothing was sent."
             )
         entry = self.entry(model)
-        repo_access = self._config.file_tools.enabled
         outcome = (
-            await elicit(
-                acceptance_question(model, entry, status, block=block, repo_access=repo_access)
-            )
+            await elicit(acceptance_question(model, entry, status, block=block, repo_access=False))
             if elicit
             else "unavailable"
         )
         if outcome == "accept":
             self._accepted.add(model)
-            try:
-                remember_accepted_model(model, self._config_path)
-            except (ConfigError, OSError) as exc:
-                _log.warning(
-                    "accepted %s for this session only; config not updated (%s)",
-                    model,
-                    type(exc).__name__,
-                )
-            return Preflight(True)
+            self._remember(remember_accepted_model, model, "accepted")
+            return await self._with_repo_consent(model, elicit, want_tools)
         if outcome == "decline":
             return Preflight(False, message=declined_message(model))
         if outcome == "cancel":
             return Preflight(False, message=dismissed_message(model))
+        if not is_free(model):  # can't ask about a price: never charge unasked (#141)
+            return Preflight(False, message=unattended_paid_refused_message(model))
         if status is not PrivacyStatus.SOME_MAY_COLLECT:
             return Preflight(False, message=unattended_refused_message(model, status))
         self._notified.add(model)
         self._deny_models.add(model)  # unattended: privacy-only routing for this model
+        # Text notice, no consent needed: free (no charge) and deny-routed (no collection).
         return Preflight(
             True,
             notice=first_use_notice(
-                model,
-                entry,
-                status,
-                block=block,
-                forced_deny=True,
-                repo_access=repo_access,
+                model, entry, status, block=block, forced_deny=True, repo_access=False
             ),
+            tools=False,
+            tools_reason="unasked" if want_tools else "",
         )
 
-    def take_repo_notice(self) -> str:
-        """The one-time 'files go to the provider' notice, or '' once it has been shown."""
-        if self._repo_notice_shown or self._config.openrouter.repo_access_notice_shown:
-            return ""
-        self._repo_notice_shown = True
+    async def _with_repo_consent(
+        self, model: str, elicit: Optional[Elicit], want_tools: bool
+    ) -> Preflight:
+        """Go ahead with an accepted (or notified) `model`; with `want_tools`, with file tools
+        only once the user has let it read repository files (its own question, asked once)."""
+        if not want_tools:
+            return Preflight(True, tools=False)
+        if model in self._repo_access:
+            return Preflight(True, tools=True)
+        if model in self._repo_declined:
+            return Preflight(True, tools=False, tools_reason="declined")
+        if elicit is None:  # can't ask: no probe, no file tools
+            return Preflight(True, tools=False, tools_reason="unasked")
+        status = await self.privacy_status(model)
+        block = self._config.openrouter.block_data_collection
+        outcome = await elicit(repo_access_question(model, status, block=block))
+        if outcome == "accept":
+            self._allow_repo(model)
+            return Preflight(True, tools=True)
+        if outcome in ("decline", "cancel"):
+            self._repo_declined.add(model)
+            return Preflight(True, tools=False, tools_reason="declined")
+        return Preflight(True, tools=False, tools_reason="unasked")
+
+    def _allow_repo(self, model: str) -> None:
+        self._repo_access.add(model)
+        self._remember(remember_repo_access, model, "repository access granted")
+
+    def _remember(self, write: Callable[[str, Path], None], model: str, what: str) -> None:
         try:
-            remember_repo_notice_shown(self._config_path)
+            write(model, self._config_path)
         except (ConfigError, OSError) as exc:
-            _log.warning("repository notice shown but not remembered (%s)", type(exc).__name__)
-        return _REPO_NOTICE
+            _log.warning(
+                "%s for %s this session only; config not updated (%s)",
+                what,
+                model,
+                type(exc).__name__,
+            )
 
     def resolve_model(self, model: Optional[str]) -> str:
         if model is None:

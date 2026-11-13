@@ -35,6 +35,7 @@ __all__ = [
     "ModelSource",
     "Preflight",
     "Session",
+    "ToolsReason",
     "Surface",
 ]
 
@@ -50,16 +51,25 @@ class Session:
 
 
 ElicitOutcome = Literal["accept", "decline", "cancel", "unavailable"]
+# An Elicit is handed out only when the client can be asked; None means it can't (#141).
 Elicit = Callable[[str], Awaitable[ElicitOutcome]]
+# Why a call that wanted the file tools runs without them: "" (it didn't), the user declined
+# repository access, or sidekick couldn't ask.
+ToolsReason = Literal["", "declined", "unasked"]
 
 
 @dataclass(frozen=True)
 class Preflight:
-    """Result of a backend's pre-call check: go ahead (maybe with a notice) or stop with a message."""
+    """Result of a backend's pre-call check: go ahead (maybe with a notice) or stop with a message.
+
+    `tools` says whether this call may carry the repository file tools; `tools_reason` says why
+    not, when the call wanted them."""
 
     proceed: bool
     notice: str = ""
     message: str = ""
+    tools: bool = True
+    tools_reason: ToolsReason = ""
 
 
 @dataclass(frozen=True)
@@ -104,9 +114,9 @@ class Backend(Protocol):
 
     def can_fall_back(self, exc: ClientError) -> bool: ...
 
-    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight: ...
-
-    def take_repo_notice(self) -> str: ...
+    async def preflight(
+        self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
+    ) -> Preflight: ...
 
     async def ask(
         self,

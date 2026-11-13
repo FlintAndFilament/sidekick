@@ -80,8 +80,8 @@ def _openrouter(surface: Optional[Surface]) -> bool:
 
 
 _OR_ACCESS_FILES = (
-    "Repository: OpenRouter models that support tools read this repository; for others, paste "
-    "the code."
+    "Repository: OpenRouter models that support tools read this repository once you allow it; "
+    "for others, paste the code."
 )
 _OR_ACCESS = (
     "Repository: the default model runs on OpenRouter and is conversation only, so paste the "

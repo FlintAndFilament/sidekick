@@ -1,7 +1,7 @@
 # Tools Reference
 
 Eight tools: five generating tools (`ask`, `brainstorm`, `review`,
-`debug`, `architect`) that call Gemini, and three utilities that do not generate:
+`debug`, `architect`) that call the model, and three utilities that do not generate:
 [`list_models`](#list_models), [`list_sessions`](#list_sessions) and [`help`](#help).
 
 **Setup mode.** If the server can't start for real (config, auth, `transcript_dir` or
@@ -41,12 +41,16 @@ Every generating call appends an entry to the session transcript — see
 
 ## Repository access
 
-Gemini can inspect — and for some tools, write to — the project root: `CLAUDE_PROJECT_DIR`
+The model can inspect — and for some tools, write to — the project root: `CLAUDE_PROJECT_DIR`
 when Claude Code sets it to a real directory, otherwise the server's working directory (#102).
 This is the same root transcripts use (see [transcripts.md](transcripts.md#transcript-directory)).
-Gemini never touches disk itself: it *requests* a tool call, and the bridge runs it locally
+The model never touches disk itself: it *requests* a tool call, and the bridge runs it locally
 inside a sandbox, then sends the result back. One MCP call allows up to 20 rounds of such
-requests; after that Gemini is told to answer with what it has.
+requests; after that the model is told to answer with what it has.
+
+This works on both backends with the same tools, sandbox, limits and transcript records: every
+Gemini model, and every OpenRouter model whose catalog entry lists tool calling (#132). See
+[OpenRouter models](#openrouter-models) for how the OpenRouter path differs.
 
 **Diagram:** [diagrams/tool-loop.mermaid](diagrams/tool-loop.mermaid) — how one call's function-calling loop runs, caps, and ends.
 
@@ -58,7 +62,7 @@ requests; after that Gemini is told to answer with what it has.
 | `architect` | ✅ | ✅ | **default** (`write_artifact=false` to skip) |
 | `review` | ✅ | ✅ | **default** (`write_artifact=false` to skip) |
 
-**Tools Gemini can call** (paths are relative to the repo root):
+**Tools the model can call** (paths are relative to the repo root):
 
 | Tool | Does | Cap |
 |---|---|---|
@@ -90,7 +94,7 @@ A result that hits a cap is flagged `truncated=true`; a `grep` that runs out of 
 - Writes are atomic, keep the file's existing permissions (e.g. an executable script stays
   executable), and replace a symlink at the target rather than writing through it. There is no
   delete, rename, chmod, or execute — nothing in the bridge spawns a process.
-- If the model is overloaded (503/429) **after** Gemini has written a file during the call, the
+- If the model is overloaded (503/429) **after** it has written a file during the call, the
   bridge returns an error instead of re-running the call on the fallback model, so writes are
   never replayed.
 - Every call, including rejections, is listed under **Tool calls** in the transcript entry.
@@ -98,7 +102,7 @@ A result that hits a cap is flagged `truncated=true`; a `grep` that runs out of 
 **Diagram:** [diagrams/file-sandbox.mermaid](diagrams/file-sandbox.mermaid) — how each file-tool call is checked against the sandbox and served.
 
 **How the calling client learns about this.** The capability is advertised to the MCP client,
-not just to Gemini, so a Claude session knows to name paths instead of pasting file contents and
+not just to the model, so a Claude session knows to name paths instead of pasting file contents and
 knows which calls may touch the working tree. Every channel is computed from the live
 workspace at registration, so none can drift from the capability actually wired up:
 
@@ -528,10 +532,34 @@ See [configuration.md](configuration.md#choosing-a-model) for the recommended mo
 
 ### OpenRouter models
 
-OpenRouter models are **conversation only**: they see the prompt and the session, not your files
-or the web, so Claude pastes the code they need. `web=true` is ignored with a notice. Tool use for
-OpenRouter models is tracked in #132. Gemini models (`flash`, `flash-lite`, `pro`, `gemini-*`)
-keep file and web access.
+**Repository access (#132).** An OpenRouter model whose catalog entry lists `tools` in
+`supported_parameters` gets the same file tools as Gemini — `list_dir`, `glob`, `grep`,
+`read_file`, and `write_file` on `brainstorm`, `review` and `architect` — through the same
+sandbox, the same 20-round loop and the same **Tool calls** records in the transcript. Only the
+wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run by
+`openai_tool_loop.py`):
+
+- Calls that carry tools set `provider.require_parameters: true`, so OpenRouter routes only to
+  providers that support tool calling. If none is available (also counting
+  `block_data_collection`), OpenRouter forwards the call nowhere, and the message says so
+  instead of the plain privacy refusal.
+- On the round cap, the forced final request keeps the tool definitions and sends
+  `tool_choice: "none"`, so the provider still accepts the tool history but cannot call again.
+- Arguments that are not a JSON object go back to the model as
+  `{"error": "arguments were not valid JSON"}` and count against the cap.
+- With no model picked, the free default and the free fallback try tool-capable free models
+  first.
+- **Models without tool calling stay conversation only.** No tools are sent, and the reply starts
+  with a notice that the model could not read repository files, so paste the code or pick a
+  tool-capable model. The same happens when the catalog could not be loaded (tool support
+  unknown).
+- **Disclosure.** Files the model reads are sent to the provider serving it. The first-use
+  question for a new model says so, and the first reply that actually used file tools carries a
+  one-time notice (remembered as
+  [`openrouter.repo_access_notice_shown`](configuration.md#openrouterrepo_access_notice_shown)).
+
+**No web.** OpenRouter models have no web search: `web=true` is ignored with a notice. Gemini
+models (`flash`, `flash-lite`, `pro`, `gemini-*`) keep web access.
 
 The first call on an OpenRouter model asks a question with its price and privacy status; see
 [first-use-acceptance](diagrams/first-use-acceptance.mermaid) and

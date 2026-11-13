@@ -241,11 +241,28 @@ Also in `v0.5.0`:
 - `list_models` shows prices, privacy markers, search (`query=`) and a privacy check (`check=`).
   `/sidekick:setup` leads with OpenRouter.
 
+### OpenRouter repository access (#132) — unreleased
+
+- OpenRouter models that support tool calling read the repository with the same sandboxed file
+  tools Gemini uses: `list_dir`, `glob`, `grep`, `read_file`, and `write_file` on `brainstorm`,
+  `review` and `architect`. Same sandbox, same 20-round cap, same transcript records; the loop is
+  `openai_tool_loop.py` over the shared `ToolRegistry`.
+- Calls with tools route only to providers that support them (`provider.require_parameters`).
+  The forced final round sends `tool_choice: "none"`. The free default and free fallback try
+  tool-capable free models first.
+- Models without tool calling, or any model while the catalog is unavailable, stay conversation
+  only, and the reply says so.
+- Disclosure: files the model reads go to the provider serving it. New models' first-use
+  question says so; already-accepted models get a one-time notice on the first reply that used
+  file tools (`openrouter.repo_access_notice_shown`). README has a "What leaves your machine"
+  line.
+
 ---
 
 ## Open
 
-Tool use for OpenRouter models (#132).
+- Per-model / per-user tool configuration for OpenRouter (the second half of #132).
+- Web search for OpenRouter models: none today, `web=true` is ignored with a notice.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).
 

@@ -94,14 +94,20 @@ class Router:
 
     @property
     def surface(self) -> Surface:
-        return Surface("openrouter", False, False, self.web_default, self._gemini is not None)
+        return Surface(
+            "openrouter",
+            self._openrouter.tools_supported(self.default_model),
+            False,
+            self.web_default,
+            self._gemini is not None,
+        )
 
     def model_hint(self) -> str:
         hint = (
             f"Optional model. Omit for the default ({self.default_model}). Any OpenRouter id "
             "from list_models, e.g. deepseek/deepseek-v4.1-flash-1017, moonshotai/kimi-k3.1-pro "
-            "or x-ai/grok-4.7: conversation only, it sees this prompt and the session, not your "
-            "files or the web. "
+            "or x-ai/grok-4.7: OpenRouter models that support tools read this repository; none "
+            "have web. "
         )
         if self._gemini is not None:
             hint += (

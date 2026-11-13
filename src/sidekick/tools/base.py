@@ -161,8 +161,10 @@ _ARTIFACT_CLAUSE: dict[ArtifactMode, str] = {
 
 
 _OPENROUTER_WEB = (
-    "\n\nWeb access: none for OpenRouter models; web=true is ignored and the reply says so."
+    "\n\nWeb access: none — OpenRouter models don't offer web search; web=true is ignored and "
+    "the reply says so."
 )
+_OPENROUTER_PRIVACY = " Files the model reads are sent to the OpenRouter provider serving it."
 
 
 def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str:
@@ -194,19 +196,50 @@ def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str
     return note
 
 
+def _read_row(subject: str, workspace: Workspace) -> str:
+    """The repository-read sentence, shared by Gemini and tool-capable OpenRouter models."""
+    return (
+        f"\n\nRepository access: {subject} reads this repository itself with "
+        f"{', '.join(READ_TOOL_NAMES)}, "
+        f"sandboxed to {workspace.sandbox.root} — {deny_note(workspace.sandbox)}, and "
+        f"{_SEARCH_NOTE}. Name the paths it should look at rather than pasting file contents "
+        "into this call."
+    )
+
+
+def _write_note(subject: str, workspace: Workspace, write: bool) -> str:
+    if write:
+        return (
+            f" This call MAY MODIFY the working tree: {subject} can create or overwrite files "
+            f"anywhere under the root with {WRITE_TOOL_NAME} (up to {workspace.max_write_bytes} "
+            "bytes "
+            "each). It cannot delete, rename, or execute anything."
+        )
+    return f" {subject} itself cannot modify the working tree."
+
+
 def _openrouter_hint(
     workspace: Optional[Workspace],
     write: bool,
     artifacts: ArtifactMode,
     gemini_available: bool,
     disk: str,
+    files: bool = False,
 ) -> str:
-    """The capability row when the default model runs on OpenRouter: conversation only."""
-    hint = (
-        "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
-        "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
-        "nothing else. Include the code or context you want considered directly in this call."
-    )
+    """The capability row when the default model runs on OpenRouter.
+
+    With `files` (the default model accepts tool definitions and a workspace is wired) it reads
+    the repository like Gemini does; otherwise it is conversation only.
+    """
+    if files and workspace is not None and workspace.tools_enabled:
+        hint = _read_row("the model", workspace) + _OPENROUTER_PRIVACY
+        disk += _write_note("The model", workspace, write)
+    else:
+        hint = (
+            "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
+            "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
+            "nothing else. Include the code or context you want considered directly in this call."
+        )
     if gemini_available and workspace is not None and workspace.tools_enabled:
         hint += (
             " Passing model=flash, flash-lite, pro or a gemini-* id runs the call on Gemini "
@@ -227,6 +260,7 @@ def capability_hint(
     web_supported: bool = True,
     default_backend: Literal["gemini", "openrouter"] = "gemini",
     gemini_available: bool = False,
+    files: bool = False,
 ) -> str:
     """Client-facing sentence describing what this tool can read and what it writes (#74).
 
@@ -239,7 +273,7 @@ def capability_hint(
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
     if default_backend == "openrouter":
-        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk)
+        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk, files)
     # Only claim write_file is withheld where it would otherwise have been offered:
     # with file tools off, it does not exist and mentioning it would mislead.
     web_note = _web_note(
@@ -256,22 +290,8 @@ def capability_hint(
             f"Gemini itself cannot write anything.{web_note}"
         )
 
-    hint = (
-        f"\n\nRepository access: Gemini reads this repository itself with "
-        f"{', '.join(READ_TOOL_NAMES)}, "
-        f"sandboxed to {workspace.sandbox.root} — {deny_note(workspace.sandbox)}, and "
-        f"{_SEARCH_NOTE}. Name the paths it should look at rather than pasting file contents "
-        "into this call."
-    )
-    if write:
-        disk += (
-            " This call MAY MODIFY the working tree: Gemini can create or overwrite files "
-            f"anywhere under the root with {WRITE_TOOL_NAME} (up to {workspace.max_write_bytes} "
-            "bytes "
-            "each). It cannot delete, rename, or execute anything."
-        )
-    else:
-        disk += " Gemini itself cannot modify the working tree."
+    hint = _read_row("Gemini", workspace)
+    disk += _write_note("Gemini", workspace, write)
     return hint + disk + _ARTIFACT_CLAUSE[artifacts] + web_note
 
 

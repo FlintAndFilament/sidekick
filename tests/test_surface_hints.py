@@ -21,7 +21,35 @@ def test_openrouter_default_says_paste_context(tmp_path):
     assert "conversation only" in hint
     assert "list_dir" not in hint
     assert "Writes to disk" in hint
-    assert "Web access: none for OpenRouter models" in hint
+    assert "Web access: none" in hint and "don't offer web search" in hint
+
+
+def test_openrouter_with_files_describes_repository_reads(tmp_path):
+    ws = _workspace(tmp_path)
+    ro = capability_hint(ws, write=False, default_backend="openrouter", files=True)
+    assert "read_file" in ro and "list_dir" in ro
+    assert "write_file" not in ro and "conversation only" not in ro
+    assert "Gemini" not in ro
+    assert "sent to the OpenRouter provider serving it" in ro
+    assert "don't offer web search" in ro
+    rw = capability_hint(ws, write=True, default_backend="openrouter", files=True)
+    assert "write_file" in rw
+
+
+def test_openrouter_files_without_workspace_stays_conversation_only(tmp_path):
+    hint = capability_hint(None, write=False, default_backend="openrouter", files=True)
+    assert "conversation only" in hint and "read_file" not in hint
+
+
+def test_router_surface_files_follows_tools_supported(tmp_path):
+    from tests._openrouter_fixtures import entry
+
+    plain = make_client(FakeOpenRouter(), tmp_path)
+    assert Router(plain).surface.files is False
+    model = plain.default_model
+    tooled = make_client(FakeOpenRouter(catalog=[entry(model, tools=True)]), tmp_path)
+    assert Router(tooled).surface.files is True
+    assert "read this repository" in Router(tooled).model_hint()
 
 
 def test_override_to_gemini_is_described_only_when_gemini_exists(tmp_path):

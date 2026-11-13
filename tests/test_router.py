@@ -79,9 +79,11 @@ def test_sessions_merge_most_recent_first(tmp_path):
 
 def test_model_hint(tmp_path):
     o = make_client(FakeOpenRouter(), tmp_path)
-    assert (
-        "x-ai/grok-4.7" in Router(o).model_hint() and "conversation only" in Router(o).model_hint()
+    assert "x-ai/grok-4.7" in Router(o).model_hint()
+    assert "OpenRouter models that support tools read this repository; none have web." in (
+        Router(o).model_hint()
     )
+    assert "conversation only" not in Router(o).model_hint()
     assert "google/<id> through OpenRouter" in Router(o).model_hint()
     assert "runs on Gemini directly" in Router(o, _gemini()).model_hint()
     assert Router(o).model_hint().endswith(" list_models shows prices.")

@@ -80,8 +80,8 @@ def _openrouter(surface: Optional[Surface]) -> bool:
 
 
 _OR_ACCESS = (
-    "Repository: the default model runs on OpenRouter and is conversation only, so paste the "
-    "code it needs."
+    "Repository: OpenRouter models that support tools read this repository; for others, paste "
+    "the code."
 )
 _OR_GEMINI_ACCESS = (
     " model=flash, flash-lite, pro or gemini-* runs on Gemini, which reads repository files itself."

@@ -257,7 +257,7 @@ Also in `v0.5.0`:
   file tools (`openrouter.repo_access_notice_shown`). README has a "What leaves your machine"
   line.
 
-### Ask before repository access and before billing (#141) — unreleased
+### Ask before repository access and before billing (#141) — 0.7.1
 
 - A model gets the file tools only after you agree, per model, remembered in
   `openrouter.repo_access_models`, asked as its own question before a model's first call with

@@ -1,6 +1,6 @@
 {
   "name": "sidekick",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A second opinion inside Claude Code from the model you choose: OpenRouter (Grok, Kimi, DeepSeek, Qwen, GPT, Claude, Gemini and more) or Google Gemini directly. Review, debug, architect, brainstorm. Run /sidekick:setup after installing.",
   "author": {
     "name": "FlintAndFilament"

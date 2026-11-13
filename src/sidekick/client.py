@@ -272,16 +272,15 @@ class GeminiClient:
     def can_fall_back(self, exc: ClientError) -> bool:
         return _is_retryable(exc)
 
-    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight:
-        """Nothing to confirm for Gemini; optionally a one-time unpaid-tier privacy notice."""
+    async def preflight(
+        self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
+    ) -> Preflight:
+        """Nothing to confirm for Gemini, which reads files by design (want_tools is ignored);
+        optionally a one-time unpaid-tier privacy notice."""
         if self._notice_pending:
             self._notice_pending = False
             return Preflight(True, notice=GEMINI_UNPAID_NOTICE)
         return Preflight(True)
-
-    def take_repo_notice(self) -> str:
-        """Gemini reads files by design; there is nothing extra to disclose."""
-        return ""
 
     @property
     def surface(self) -> Surface:

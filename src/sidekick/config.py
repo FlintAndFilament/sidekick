@@ -113,10 +113,12 @@ class OpenRouterConfig(BaseModel):
     accepted_models: list[str] = Field(default_factory=list)
     # true = send provider.data_collection="deny" on every request.
     block_data_collection: bool = False
-    # true = the one-time "files the model reads go to the serving provider" notice was shown.
+    # Models the user has let read repository files; see remember_repo_access.
+    repo_access_models: list[str] = Field(default_factory=list)
+    # Deprecated, ignored: the old one-time repository notice. Kept so existing files still load.
     repo_access_notice_shown: bool = False
 
-    @field_validator("default_model", "accepted_models")
+    @field_validator("default_model", "accepted_models", "repo_access_models")
     @classmethod
     def _ids_look_like_model_ids(cls, value: object) -> object:
         ids = [value] if isinstance(value, str) else (value or [])
@@ -260,20 +262,25 @@ def _update_openrouter_section(
         raise ConfigError(f"Config file could not be written ({path}): {exc.strerror}") from exc
 
 
-def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
-    """Record a paid OpenRouter model as accepted in config.json. Raises ConfigError."""
+def _append_model(path: Path, key: str, model_id: str) -> None:
+    """Add `model_id` to the list `openrouter.<key>` in config.json, once. Raises ConfigError."""
 
     def add(section: dict[str, Any]) -> dict[str, Any]:
-        accepted = section.get("accepted_models", [])
-        if not isinstance(accepted, list):
-            raise ConfigError(f"'openrouter.accepted_models' in {path} must be a list.")
-        if model_id in accepted:
+        ids = section.get(key, [])
+        if not isinstance(ids, list):
+            raise ConfigError(f"'openrouter.{key}' in {path} must be a list.")
+        if model_id in ids:
             return section
-        return {**section, "accepted_models": [*accepted, model_id]}
+        return {**section, key: [*ids, model_id]}
 
     _update_openrouter_section(path, add)
 
 
-def remember_repo_notice_shown(path: Path = CONFIG_PATH) -> None:
-    """Record that the one-time OpenRouter repository-access notice was shown. Raises ConfigError."""
-    _update_openrouter_section(path, lambda section: {**section, "repo_access_notice_shown": True})
+def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
+    """Record a paid OpenRouter model as accepted in config.json. Raises ConfigError."""
+    _append_model(path, "accepted_models", model_id)
+
+
+def remember_repo_access(model_id: str, path: Path = CONFIG_PATH) -> None:
+    """Record that an OpenRouter model may read repository files. Raises ConfigError."""
+    _append_model(path, "repo_access_models", model_id)

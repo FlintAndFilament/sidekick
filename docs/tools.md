@@ -553,10 +553,12 @@ wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run
   with a notice that the model could not read repository files, so paste the code or pick a
   tool-capable model. The same happens when the catalog could not be loaded (tool support
   unknown).
-- **Disclosure.** Files the model reads are sent to the provider serving it. The first-use
-  question for a new model says so, and the first reply that actually used file tools carries a
-  one-time notice (remembered as
-  [`openrouter.repo_access_notice_shown`](configuration.md#openrouterrepo_access_notice_shown)).
+- **Asked first.** Files the model reads are sent to the provider serving it, so a model gets the
+  file tools only after you agree, per model: it is asked once, as its own question, before its
+  first call with file tools (for a new model, right after the price and privacy question).
+  Saying no, or running unattended, sends the call without file tools, and the reply starts with
+  a notice saying which. Agreed models are remembered in
+  [`openrouter.repo_access_models`](configuration.md#openrouterrepo_access_models).
 - **Thinking models are not yet verified.** Tool use over several rounds is verified on the
   default free model. Thinking models that need their reasoning state sent back between tool
   rounds (for example Gemini 3 through OpenRouter, `google/gemini-3*`) are not yet verified and

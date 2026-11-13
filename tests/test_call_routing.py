@@ -4,13 +4,15 @@ import asyncio
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from sidekick.client import GEMINI_UNPAID_NOTICE, GeminiClient
 from sidekick.config import Config
+from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE, unattended_paid_refused_message
 from sidekick.router import Router
-from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini
+from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini, elicitor
 from sidekick.transcript import TranscriptWriter
 from tests._openrouter_fixtures import CATALOG, FakeOpenRouter, make_client, reply, tool_reply
 from tests.test_capability_metadata import _workspace
@@ -36,6 +38,36 @@ def _files_notice(model: str) -> str:
         "saw only this prompt and the session's earlier turns. Paste the code, or pick a "
         "tool-capable model (list_models).\n\n"
     )
+
+
+def _declined_notice(model: str) -> str:
+    return (
+        f"[sidekick notice] You declined repository access for `{model}`, so it saw only this "
+        "prompt and the session's earlier turns.\n\n"
+    )
+
+
+def _unasked_notice(model: str) -> str:
+    return (
+        f"[sidekick notice] `{model}` didn't read repository files: sidekick couldn't ask you to "
+        "allow it here. Allow it from an interactive session, or add the id to "
+        "openrouter.repo_access_models in ~/.config/sidekick/config.json.\n\n"
+    )
+
+
+def _incapable_ctx() -> Any:
+    """A request context whose client did not declare the elicitation capability."""
+    session = SimpleNamespace(check_client_capability=lambda caps: False)
+    return SimpleNamespace(request_context=SimpleNamespace(session=session), elicit=AsyncMock())
+
+
+def _tool_names(post: dict[str, Any]) -> set[str]:
+    return {t["function"]["name"] for t in post.get("tools", [])}
+
+
+def _sent(fake: FakeOpenRouter) -> list[dict[str, Any]]:
+    """The posts that carried the prompt, not the 16-token privacy probes."""
+    return [p for p in fake.posts if p.get("max_tokens") != 16]
 
 
 def _with_tools(*ids: str) -> list[dict[str, Any]]:
@@ -131,7 +163,11 @@ async def test_openrouter_non_tool_model_gets_notice_even_without_model_arg(tmp_
 
 async def test_openrouter_tool_capable_model_gets_registry_and_preamble(tmp_path):
     r, fake, _ = _router(
-        tmp_path, [(200, reply())], accepted_models=[NEMO], catalog=_with_tools(NEMO)
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
     )
     answer = await _call(r, tmp_path, model=None)
     assert answer == "fine"
@@ -145,7 +181,13 @@ async def test_openrouter_tool_capable_model_gets_registry_and_preamble(tmp_path
 async def test_openrouter_tool_capable_fallback_fails_over_to_non_tool_model(tmp_path):
     """The fallback gets its own decision: no tools, no preamble, and the files notice."""
     script = [RATE_LIMITED, RATE_LIMITED, (200, reply())]
-    r, fake, _ = _router(tmp_path, script, accepted_models=[NEMO, GEMMA], catalog=_with_tools(NEMO))
+    r, fake, _ = _router(
+        tmp_path,
+        script,
+        accepted_models=[NEMO, GEMMA],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
     answer = await _call(r, tmp_path)
     assert [p["model"] for p in fake.posts] == [NEMO, NEMO, GEMMA]
     assert "tools" in fake.posts[0] and "tools" not in fake.posts[2]
@@ -166,7 +208,11 @@ async def test_fallback_after_tool_rounds_keeps_records(tmp_path):
         (200, reply()),
     ]
     r, fake, _ = _router(
-        tmp_path, script, accepted_models=[NEMO, GEMMA], catalog=_with_tools(NEMO, GEMMA)
+        tmp_path,
+        script,
+        accepted_models=[NEMO, GEMMA],
+        repo_access_models=[NEMO, GEMMA],
+        catalog=_with_tools(NEMO, GEMMA),
     )
     answer = await _call(r, tmp_path)
     assert [p["model"] for p in fake.posts] == [NEMO, NEMO, NEMO, GEMMA, GEMMA]
@@ -310,63 +356,189 @@ async def test_gemini_unpaid_notice_survives_a_failed_call(tmp_path):
     assert answer.startswith(GEMINI_UNPAID_NOTICE + "[sidekick error]")
 
 
+# --- Repository consent (#141): file tools only after the user accepts ---------------------
+
+
+async def test_accepted_model_without_consent_and_no_way_to_ask_gets_no_file_tools(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())], accepted_models=[NEMO], catalog=_with_tools(NEMO)
+    )
+    answer = await _call(r, tmp_path, model=None)
+    assert answer == _unasked_notice(NEMO) + "fine"
+    post = fake.posts[0]
+    assert "tools" not in post and "list_dir" not in post["messages"][0]["content"]
+
+
+async def test_tool_capable_model_with_consent_gets_registry_once_asked(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[NEMO], catalog=_with_tools(NEMO)
+    )
+    elicit, asked = _asker("accept")
+    first = await _call(r, tmp_path, model=None, elicit=elicit)
+    second = await _call(r, tmp_path, model=None, elicit=elicit)
+    assert first == "fine" and second == "fine"
+    assert len(asked) == 1 and "read files in this repository" in asked[0]
+    sent = _sent(fake)
+    assert len(sent) == 2 and all("list_dir" in _tool_names(p) for p in sent)
+    assert "list_dir, glob, grep, and read_file" in sent[0]["messages"][0]["content"]
+
+
+async def test_first_use_asks_price_then_repository_access_separately(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[], catalog=_with_tools(KIMI))
+    elicit, asked = _asker("accept")
+    answer = await _call(r, tmp_path, model=KIMI, elicit=elicit)
+    assert answer.endswith("fine") and "repository access" not in answer
+    assert len(asked) == 2 and REPO_ACCESS_SENTENCE not in asked[0]
+    assert asked[0].startswith(f"Use `{KIMI}`") and asked[1].startswith(f"Let `{KIMI}` read")
+    assert "list_dir" in _tool_names(fake.posts[-1])
+
+
+async def test_first_use_accept_then_repository_decline_runs_conversation_only(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[], catalog=_with_tools(KIMI))
+    elicit, asked = _asker("accept", "decline")
+    answer = await _call(r, tmp_path, model=KIMI, elicit=elicit)
+    assert answer == _declined_notice(KIMI) + "fine" and len(asked) == 2
+    sent = _sent(fake)
+    assert len(sent) == 1 and "tools" not in sent[0]
+    assert "list_dir" not in sent[0]["messages"][0]["content"]
+
+
+async def test_unaccepted_paid_model_with_a_client_that_cannot_ask_sends_nothing(tmp_path):
+    """The real call path: the tools pass elicitor(ctx), which knows the client can't ask."""
+    r, fake, gen = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[], catalog=_with_tools(KIMI)
+    )
+    answer = await _call(r, tmp_path, model=KIMI, elicit=elicitor(_incapable_ctx()))
+    assert answer == unattended_paid_refused_message(KIMI)
+    assert fake.posts == []  # not even the billed privacy probe
+    gen.assert_not_awaited()
+    assert not _transcript_written(tmp_path)
+
+
+async def test_free_model_with_a_client_that_cannot_ask_runs_without_file_tools(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[], catalog=_with_tools(NEMO)
+    )
+    answer = await _call(r, tmp_path, model=NEMO, elicit=elicitor(_incapable_ctx()))
+    assert answer.endswith(_unasked_notice(NEMO) + "fine")
+    sent = _sent(fake)
+    assert len(sent) == 1 and "tools" not in sent[0]
+    assert sent[0]["provider"]["data_collection"] == "deny"
+
+
+async def test_declined_repository_access_sends_without_tools_and_says_so(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[NEMO], catalog=_with_tools(NEMO)
+    )
+    elicit, asked = _asker("decline")
+    first = await _call(r, tmp_path, model=None, elicit=elicit)
+    second = await _call(r, tmp_path, model=None, elicit=elicit)
+    assert first == second == _declined_notice(NEMO) + "fine"
+    assert len(asked) == 1  # not asked again until the server restarts
+    assert all("tools" not in p for p in fake.posts)
+    assert all("list_dir" not in p["messages"][0]["content"] for p in fake.posts)
+
+
+async def test_repointed_default_during_question_tools_follow_the_sent_model(tmp_path):
+    """NEMO is allowed tools, then the default rotates to GEMMA, whose access is declined."""
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO, GEMMA],
+        catalog=_with_tools(NEMO, GEMMA),
+    )
+    asked: list[str] = []
+
+    async def elicit(message: str):  # type: ignore[no-untyped-def]
+        asked.append(message)
+        if len(asked) == 1:
+            r.openrouter._cooling[NEMO] = time.monotonic() + 600
+            r.openrouter.get_or_create_session("review:s")
+            return "accept"
+        return "decline"
+
+    answer = await _call(r, tmp_path, elicit=elicit)
+    assert [m for q in asked for m in (NEMO, GEMMA) if m in q] == [NEMO, GEMMA]
+    sent = _sent(fake)
+    assert [p["model"] for p in sent] == [GEMMA] and "tools" not in sent[0]
+    assert answer == _declined_notice(GEMMA) + "fine"
+
+
+async def test_repointed_default_to_consenting_model_gets_tools(tmp_path):
+    """NEMO can't use tools; the default rotates to GEMMA, which is allowed them.
+
+    GEMMA accepts tools, so it would lead the free list; it starts out cooling."""
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply("ok"))] * 2 + [(200, reply())],
+        accepted_models=[],
+        catalog=_with_tools(GEMMA),
+    )
+    asked: list[str] = []
+
+    r.openrouter._cooling[GEMMA] = time.monotonic() + 600
+
+    async def elicit(message: str):  # type: ignore[no-untyped-def]
+        asked.append(message)
+        if len(asked) == 1:
+            r.openrouter._cooling[GEMMA] = 0.0
+            r.openrouter.get_or_create_session("review:s")
+        return "accept"
+
+    answer = await _call(r, tmp_path, elicit=elicit)
+    assert NEMO in asked[0] and REPO_ACCESS_SENTENCE not in asked[0]
+    assert asked[1].startswith(f"Use the free model `{GEMMA}`")
+    assert asked[2].startswith(f"Let `{GEMMA}` read files in this repository?")
+    assert fake.posts[-1]["model"] == GEMMA and "list_dir" in _tool_names(fake.posts[-1])
+    assert answer == "fine"
+
+
+async def test_fallback_gets_its_own_repository_decision(tmp_path):
+    script = [RATE_LIMITED, RATE_LIMITED, (200, reply())]
+    r, fake, _ = _router(
+        tmp_path,
+        script,
+        accepted_models=[NEMO, GEMMA],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO, GEMMA),
+    )
+    elicit, asked = _asker("decline")
+    answer = await _call(r, tmp_path, elicit=elicit)
+    sent = _sent(fake)
+    assert [p["model"] for p in sent] == [NEMO, NEMO, GEMMA]
+    assert "list_dir" in _tool_names(sent[0]) and "tools" not in sent[2]
+    assert len(asked) == 1 and GEMMA in asked[0]
+    assert _declined_notice(GEMMA) in answer and answer.endswith("fine")
+    assert _declined_notice(NEMO) not in answer
+
+
+async def test_reading_files_adds_no_repository_notice(tmp_path):
+    (tmp_path / "a.txt").write_text("alpha")
+    script = [(200, tool_reply(("read_file", '{"path": "a.txt"}'))), (200, reply())]
+    r, fake, _ = _router(
+        tmp_path,
+        script,
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
+    answer = await _call(r, tmp_path)
+    assert answer == "fine" and len(fake.posts) == 2
+
+
+async def test_gemini_preflight_keeps_file_tools(tmp_path):
+    r, fake, gen = _router(tmp_path, [(200, reply())], accepted_models=[])
+    elicit, asked = _asker("decline")
+    answer = await _call(r, tmp_path, model="flash", elicit=elicit)
+    assert answer == "from gemini" and asked == [] and fake.posts == []
+    assert "list_dir" in {
+        d.name for d in gen.call_args.kwargs["config"].tools[0].function_declarations
+    }
+
+
 def test_injected_context_is_not_a_tool_parameter(tmp_path):
     mcp = _register_all_tools(tmp_path)
     tools = asyncio.run(mcp.list_tools())  # type: ignore[attr-defined]
     assert len(tools) == 5
     for tool in tools:
         assert "ctx" not in tool.inputSchema["properties"], tool.name
-
-
-_READ = ("read_file", '{"path": "README.md"}')
-
-
-def _tool_router(tmp_path, replies, **kw):
-    return _router(tmp_path, replies, accepted_models=[NEMO], catalog=_with_tools(NEMO), **kw)
-
-
-def _config_flag(tmp_path) -> bool:
-    import json
-
-    path = tmp_path / "config.json"
-    if not path.exists():
-        return False
-    return bool(json.loads(path.read_text()).get("openrouter", {}).get("repo_access_notice_shown"))
-
-
-async def test_repo_notice_shown_once_and_persisted(tmp_path):
-    r, _, _ = _tool_router(
-        tmp_path,
-        [(200, tool_reply(_READ)), (200, reply()), (200, tool_reply(_READ)), (200, reply())],
-    )
-    first = await _call(r, tmp_path, model=None)
-    second = await _call(r, tmp_path, model=None)
-    assert first.startswith("[sidekick notice] This reply read repository files through OpenRouter")
-    assert first.endswith("Shown once.\n\nfine")
-    assert second == "fine"
-    assert _config_flag(tmp_path)
-
-
-async def test_repo_notice_not_shown_without_file_tool_calls(tmp_path):
-    r, _, _ = _tool_router(tmp_path, [(200, reply())])
-    assert await _call(r, tmp_path, model=None) == "fine"
-    assert not _config_flag(tmp_path)
-
-
-async def test_repo_notice_survives_unwritable_config(tmp_path):
-    r, _, _ = _tool_router(
-        tmp_path,
-        [(200, tool_reply(_READ)), (200, reply()), (200, tool_reply(_READ)), (200, reply())],
-    )
-    with patch("sidekick.openrouter.remember_repo_notice_shown", side_effect=OSError("ro")):
-        first = await _call(r, tmp_path, model=None)
-        second = await _call(r, tmp_path, model=None)
-    assert "read repository files through OpenRouter" in first
-    assert second == "fine"  # still shown only once per process
-
-
-async def test_repo_notice_respects_existing_flag(tmp_path):
-    r, _, _ = _tool_router(
-        tmp_path, [(200, tool_reply(_READ)), (200, reply())], repo_access_notice_shown=True
-    )
-    assert await _call(r, tmp_path, model=None) == "fine"

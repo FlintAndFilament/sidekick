@@ -33,7 +33,7 @@ from mcp.server.fastmcp import Context
 from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from sidekick.backends import Backend, Elicit, ElicitOutcome, ModelSource
+from sidekick.backends import Backend, Elicit, ElicitOutcome, ModelSource, ToolsReason
 from sidekick.client import (
     MAX_SESSIONS,
     ClientError,
@@ -56,18 +56,22 @@ class _AcceptForm(BaseModel):
     accept: bool = Field(default=True, description="Use this model")
 
 
-def elicitor(ctx: Context) -> Elicit:  # type: ignore[type-arg]
-    """An Elicit that asks the user through MCP elicitation; "unavailable" when it cannot."""
+def elicitor(ctx: Context) -> Optional[Elicit]:  # type: ignore[type-arg]
+    """An Elicit that asks the user through MCP elicitation, or None when this client can't be
+    asked (outside a request, or no elicitation capability). Knowing that before anything is
+    sent lets preflight refuse a paid model without the billed privacy probe (#141). The Elicit
+    answers "unavailable" when asking fails at ask time."""
+    try:
+        session = ctx.request_context.session
+        if not session.check_client_capability(
+            ClientCapabilities(elicitation=ElicitationCapability())
+        ):
+            return None
+    except ValueError:
+        return None
 
     async def elicit(message: str) -> ElicitOutcome:
         try:
-            session = ctx.request_context.session
-        except ValueError:
-            return "unavailable"
-        try:
-            caps = ClientCapabilities(elicitation=ElicitationCapability())
-            if not session.check_client_capability(caps):
-                return "unavailable"
             result = await ctx.elicit(message, _AcceptForm)
         except Exception as exc:
             _log.warning("elicitation unavailable (%s)", type(exc).__name__)
@@ -356,26 +360,46 @@ _UNSTABLE_DEFAULT = (
 )
 
 
+def _wants_tools(backend: Backend, workspace: Optional[Workspace], model: str) -> bool:
+    """Whether a call to `model` would carry the repository file tools, consent aside."""
+    return (
+        workspace is not None
+        and workspace.tools_enabled
+        and backend.supports_files
+        and backend.tools_supported(model)
+    )
+
+
 async def _preflight_until_stable(
-    backend: Backend, session: Session, model: str, elicit: Optional[Elicit]
-) -> tuple[Optional[str], str, list[str]]:
-    """Preflight the model `session` will actually send to: (refusal or None, model, notices).
+    backend: Backend,
+    session: Session,
+    model: str,
+    elicit: Optional[Elicit],
+    workspace: Optional[Workspace],
+) -> tuple[Optional[str], str, list[str], bool, ToolsReason]:
+    """Preflight the model `session` will actually send to.
+
+    Returns (refusal or None, model, notices, tools, tools_reason): `tools` is the preflight's
+    decision for that same model — whether the call may carry the repository file tools — and
+    `tools_reason` why not, when it wanted them.
 
     A preflight can await a probe or the user, and meanwhile a concurrent call may re-point a
     shared default session to another model (the free default rotated). Each new model gets
-    its own check, so nothing goes to a model that was never checked. Raises ClientError.
+    its own check, so nothing goes to a model that was never checked, and the file tools follow
+    the model actually sent to. Raises ClientError.
     """
     notices: list[str] = []
     for _ in range(_MAX_PREFLIGHTS):
-        pre = await backend.preflight(model, elicit)
+        want_tools = _wants_tools(backend, workspace, model)
+        pre = await backend.preflight(model, elicit, want_tools=want_tools)
         if not pre.proceed:
-            return pre.message, model, notices
+            return pre.message, model, notices, False, ""
         if pre.notice:
             notices.append(pre.notice)
         if session.model == model:
-            return None, model, notices
+            return None, model, notices, want_tools and pre.tools, pre.tools_reason
         model = session.model
-    return _UNSTABLE_DEFAULT, model, notices
+    return _UNSTABLE_DEFAULT, model, notices, False, ""
 
 
 async def call_gemini(
@@ -396,10 +420,12 @@ async def call_gemini(
     """Pick the backend, get a session, call ask(), log to transcript, return the reply.
 
     `client.backend_for(model)` picks the backend (Gemini or OpenRouter). With a workspace, a
-    backend that supports files and a model that accepts tools (`tools_supported`, decided for
-    the model preflight settled on, and again for a fallback), the model gets the read file
-    tools (plus write_file when `write`) unless the file_tools kill switch is off. A model that
-    can't use tools answers from the conversation alone, with a notice. Every tool call is
+    backend that supports files and a model that accepts tools (`tools_supported`), the model
+    gets the read file tools (plus write_file when `write`) unless the file_tools kill switch is
+    off — and only when the backend's preflight allows it (`Preflight.tools`: on OpenRouter,
+    after the user accepts repository access for that model). That is decided for the model
+    preflight settled on, and again for a fallback. A model without the tools answers from the
+    conversation alone, with a notice. Every tool call is
     recorded in the transcript — including calls made before a failure. With `artifact_topic`
     (and a workspace), the final answer is saved as an artifact and its path appended to the
     reply; a failed save adds a notice but never loses the answer.
@@ -442,16 +468,13 @@ async def call_gemini(
         caps = Capabilities(web=False, write=write)
     saving = workspace is not None and artifact_topic is not None
 
-    def _tooling_for(use_model: str) -> tuple[Optional[ToolRegistry], str]:
-        """The file tools `use_model` gets, and the system instruction that describes them.
+    def _tooling_for(tools: bool) -> tuple[Optional[ToolRegistry], str]:
+        """The file tools a model gets, and the system instruction that describes them.
 
-        Decided per model actually sent to (after preflight, and again for a fallback): on
-        OpenRouter only some models accept tool definitions."""
-        registry = (
-            workspace.registry(write=caps.write)
-            if workspace and backend.supports_files and backend.tools_supported(use_model)
-            else None
-        )
+        `tools` is preflight's decision for the model actually sent to (after preflight, and
+        again for a fallback): on OpenRouter only some models accept tool definitions, and only
+        after the user accepts repository access for that model."""
+        registry = workspace.registry(write=caps.write) if workspace and tools else None
         instruction = system_instruction
         if registry:
             instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
@@ -461,13 +484,28 @@ async def call_gemini(
             instruction += _WEB_PREAMBLE
         return registry, instruction
 
-    def _files_notice(use_model: str) -> str:
-        if workspace is None or not workspace.tools_enabled or backend.tools_supported(use_model):
+    def _files_notice(use_model: str, tools: bool, reason: ToolsReason) -> str:
+        # Text notice, no consent needed: informational (the model saw no files), no privacy
+        # or cost decision rides on it.
+        if workspace is None or not workspace.tools_enabled:
             return ""
+        if not backend.tools_supported(use_model):
+            return (
+                f"[sidekick notice] `{use_model}` can't use tools, so it could not read "
+                "repository files: it saw only this prompt and the session's earlier turns. "
+                "Paste the code, or pick a tool-capable model (list_models).\n\n"
+            )
+        if not _wants_tools(backend, workspace, use_model) or tools:
+            return ""
+        if reason == "declined":
+            return (
+                f"[sidekick notice] You declined repository access for `{use_model}`, so it saw "
+                "only this prompt and the session's earlier turns.\n\n"
+            )
         return (
-            f"[sidekick notice] `{use_model}` can't use tools, so it could not read repository "
-            "files: it saw only this prompt and the session's earlier turns. Paste the code, or "
-            "pick a tool-capable model (list_models).\n\n"
+            f"[sidekick notice] `{use_model}` didn't read repository files: sidekick couldn't "
+            "ask you to allow it here. Allow it from an interactive session, or add the id to "
+            "openrouter.repo_access_models in ~/.config/sidekick/config.json.\n\n"
         )
 
     records: list[ToolCallRecord] = []
@@ -477,8 +515,8 @@ async def call_gemini(
     fallback_model = backend.fallback_for(requested_model)
 
     try:
-        refusal, checked, notices = await _preflight_until_stable(
-            backend, session, requested_model, elicit
+        refusal, checked, notices, tools, tools_reason = await _preflight_until_stable(
+            backend, session, requested_model, elicit, workspace
         )
     except ClientError as exc:
         _log.error("%s session=%r preflight failed: %s", tool_name, session_name, exc)
@@ -489,7 +527,7 @@ async def call_gemini(
         requested_model, fallback_model = checked, backend.fallback_for(checked)
     # No await from here until backend.ask() reads session.model, so it sends to `checked`.
 
-    async def _do_ask(use_model: Optional[str] = None) -> str:
+    async def _do_ask(tools: bool, use_model: Optional[str] = None) -> str:
         # The fallback answer belongs to the conversation the caller named (#122). Run it on a
         # stand-in that sees the named session's turns, then commit the new turn back there, so
         # the next call without model= continues from it and no fallback-model session appears.
@@ -505,7 +543,7 @@ async def call_gemini(
         # Turns the stand-in starts with; anything past this index is this call's new turn,
         # even if a concurrent call on the same session commits while the fallback runs.
         base = len(target.history)
-        registry, instruction = _tooling_for(target.model)
+        registry, instruction = _tooling_for(tools)
         answer = await backend.ask(
             target,
             prompt,
@@ -545,9 +583,9 @@ async def call_gemini(
         return "".join(notices) + message
 
     fallback_notice: Optional[str] = None
-    answered_by = requested_model
+    answered_by, answered_tools, answered_reason = requested_model, tools, tools_reason
     try:
-        response = await _do_ask()
+        response = await _do_ask(tools)
     except ClientError as exc:
         # Retry once on the backend's fallback model when the failure allows it; None means
         # there is none (already on it, a paid OpenRouter model, or no free model left).
@@ -572,7 +610,8 @@ async def call_gemini(
                 fallback_model,
             )
             try:
-                pre_fb = await backend.preflight(fallback_model, elicit)
+                want_fb = _wants_tools(backend, workspace, fallback_model)
+                pre_fb = await backend.preflight(fallback_model, elicit, want_tools=want_fb)
                 if not pre_fb.proceed:
                     return _log_failure(
                         f"[sidekick error] {exc} (fallback {fallback_model} not used: "
@@ -580,9 +619,13 @@ async def call_gemini(
                     )
                 notices.append(pre_fb.notice)
                 fallback_at = len(records)
-                response = await _do_ask(fallback_model)
-                answered_by = fallback_model
+                fb_tools = want_fb and pre_fb.tools  # the fallback's own decision
+                response = await _do_ask(fb_tools, fallback_model)
+                answered_by, answered_tools = fallback_model, fb_tools
+                answered_reason = pre_fb.tools_reason
                 reason = "503/429" if _is_retryable(exc) else "gated by OpenRouter"
+                # Text notice, no consent needed: informational (which model answered); the
+                # fallback's own price, privacy and repository access went through preflight.
                 fallback_notice = (
                     f"[sidekick notice] Model '{requested}' was unavailable ({reason}); "
                     f"this response was generated by fallback model '{fallback_model}'.\n\n"
@@ -623,23 +666,13 @@ async def call_gemini(
         except OSError as exc:
             _log.error("%s: artifact not saved: %s", tool_name, exc)
             response += f"\n\n[sidekick notice] artifact not saved: {exc}"
+    # Text notice, no consent needed: informational (web was dropped), nothing was sent to the
+    # web and no privacy or cost decision rides on it.
     web_notice = (
         "[sidekick notice] Web access was requested but is unavailable on the "
         f"{backend.label} backend, so this answer is not web-grounded.\n\n"
         if web_refused
         else ""
     )
-    files_notice = _files_notice(answered_by)
-    repo_notice = (
-        backend.take_repo_notice()
-        if any(r.name in (*READ_TOOL_NAMES, WRITE_TOOL_NAME) for r in records)
-        else ""
-    )
-    return (
-        (fallback_notice or "")
-        + "".join(notices)
-        + repo_notice
-        + files_notice
-        + web_notice
-        + response
-    )
+    files_notice = _files_notice(answered_by, answered_tools, answered_reason)
+    return (fallback_notice or "") + "".join(notices) + files_notice + web_notice + response

@@ -257,6 +257,17 @@ Also in `v0.5.0`:
   file tools (`openrouter.repo_access_notice_shown`). README has a "What leaves your machine"
   line.
 
+### Ask before repository access and before billing (#141) — 0.7.1
+
+- A model gets the file tools only after you agree, per model, remembered in
+  `openrouter.repo_access_models`, asked as its own question before a model's first call with
+  file tools (for a new model, right after the price and privacy question). No, cancel, or no
+  way to ask sends the call without file tools, with a notice saying which. The 0.7.0 one-time text notice is
+  gone; `openrouter.repo_access_notice_shown` is ignored.
+- Unattended (the client doesn't support elicitation, checked before anything is sent), an
+  unaccepted paid model is refused before anything is sent, including the billed privacy check;
+  the message says how to accept it.
+
 ---
 
 ## Open

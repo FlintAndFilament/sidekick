@@ -39,6 +39,11 @@ async def test_unpaid_tier_notice_once_when_enabled():
     assert second == Preflight(proceed=True)
 
 
+async def test_gemini_preflight_always_allows_tools():
+    pre = await _gemini().preflight("gemini-3.5-flash", None, want_tools=True)
+    assert pre.proceed and pre.tools is True
+
+
 async def test_default_construction_has_no_notice():  # existing tests see no change
     assert await _gemini().preflight("gemini-3.5-flash", None) == Preflight(proceed=True)
 

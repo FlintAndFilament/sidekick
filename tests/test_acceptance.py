@@ -31,7 +31,8 @@ async def test_unaccepted_paid_model_asks_with_price_and_privacy(tmp_path):
     assert await c.preflight(GROK, elicit) == Preflight(proceed=True)
     assert asked == [
         "Use `x-ai/grok-4.7` at $2.00 in / $6.00 out per 1M tokens? Some providers serving it "
-        "may store or train on your prompts, and OpenRouter may route this call to one of them."
+        "may store or train on your prompts, and OpenRouter may route this call to one of them. "
+        "With repository access on, the files it reads are sent to the provider serving it."
     ]
     assert json.loads((tmp_path / "config.json").read_text())["openrouter"]["accepted_models"] == [
         GROK
@@ -98,7 +99,8 @@ async def test_free_model_question_has_privacy_and_limits_but_no_price(tmp_path)
     assert asked == [
         f"Use the free model `{NEMO}`? Every provider serving it may store or train on your "
         "prompts, including any code sent with them. Free models allow 20 requests a minute and "
-        "50 a day (1,000 a day once you have bought at least 10 credits)."
+        "50 a day (1,000 a day once you have bought at least 10 credits). "
+        "With repository access on, the files it reads are sent to the provider serving it."
     ]
 
 

@@ -2,7 +2,7 @@
 <h4 align="center">A live second opinion for Claude Code from the model you choose: OpenRouter (Grok, Kimi, DeepSeek, Qwen and more) or Google Gemini, which also reads your repo and searches the web.</h4>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.0-blue.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0-blue.svg">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-blue.svg">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-1.28+-green.svg">
 </p>
@@ -21,7 +21,7 @@
   <a href="docs/README.md">All docs</a>
 </p>
 
-sidekick is a Claude Code plugin that gives Claude a live counterpart from the model you choose: any model on OpenRouter (Grok, Kimi, DeepSeek, Qwen, GPT, Claude and more) or Google Gemini directly. When Claude hits a hard problem, such as an architecture decision, a tricky bug or a code review, it can ask for a second opinion without you switching tools. OpenRouter models answer from the conversation only, so Claude pastes the code they need; Gemini also reads your repo and searches the web.
+sidekick is a Claude Code plugin that gives Claude a live counterpart from the model you choose: any model on OpenRouter (Grok, Kimi, DeepSeek, Qwen, GPT, Claude and more) or Google Gemini directly. When Claude hits a hard problem, such as an architecture decision, a tricky bug or a code review, it can ask for a second opinion without you switching tools. Gemini and tool-capable OpenRouter models read your repo themselves; only Gemini searches the web.
 
 ## Quick start
 
@@ -51,8 +51,10 @@ Tested on macOS; Windows is not yet tested end to end.
 | `list_sessions` | Lists the conversations in memory, to find one to continue | no |
 | `help` | Full usage detail by topic, for Claude | no |
 
-- **Gemini reads your repo itself**, inside a sandbox, so Claude names paths instead of pasting files. Secrets and `.git` are always denied. → [Repository access](docs/tools.md#repository-access)
-- **Gemini searches the web with real sources** when a call passes `web=true`. It's off by default, and a web call can never write files. → [Web access](docs/tools.md#web-access)
+- **The model reads your repo itself**, inside a sandbox, so Claude names paths instead of pasting files: Gemini, and OpenRouter models that support tool calling. Secrets and `.git` are always denied. → [Repository access](docs/tools.md#repository-access)
+- **Gemini searches the web with real sources** when a call passes `web=true` (OpenRouter models have no web search). It's off by default, and a web call can never write files. → [Web access](docs/tools.md#web-access)
 - **Keeps conversations.** The same `session_name` continues one; a new name starts fresh. → [Tools](docs/tools.md)
 - **Uses the newest model.** `flash`, `flash-lite` and `pro` track the newest release; an overloaded model falls back with a notice. → [Choosing a model](docs/configuration.md#choosing-a-model)
 - **Leaves a record.** Every exchange goes into a Markdown transcript in your project, and `review` / `architect` answers are saved as files. → [Transcripts](docs/transcripts.md)
+
+**What leaves your machine.** Prompts and any files the model reads go to the backend: Google for Gemini models, the serving provider for OpenRouter models (check its privacy with `list_models check=<id>`).

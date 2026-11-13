@@ -172,3 +172,11 @@ async def test_unavailable_free_model_cools_down(tmp_path):
     with pytest.raises(OpenRouterError):
         await c.ask(c.get_or_create_session("a", NEMO), "q")
     assert c.default_model == GEMMA
+
+
+def test_acceptance_question_mentions_repo_access():
+    from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE, acceptance_question
+
+    args = (GROK, None, PrivacyStatus.SOME_MAY_COLLECT)
+    assert REPO_ACCESS_SENTENCE in acceptance_question(*args, block=False)
+    assert REPO_ACCESS_SENTENCE not in acceptance_question(*args, block=False, repo_access=False)

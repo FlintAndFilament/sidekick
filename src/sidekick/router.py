@@ -42,10 +42,15 @@ class Router:
         openrouter: OpenRouterClient,
         gemini: Optional[GeminiClient] = None,
         gemini_problem: Optional[str] = None,
+        *,
+        repository: bool = True,
     ) -> None:
+        """`repository` is False when the workspace has file tools off (an unsafe launch
+        directory, or file_tools.enabled=false), so no model is offered the repository."""
         self._openrouter = openrouter
         self._gemini = gemini
         self._gemini_problem = gemini_problem
+        self._repository = repository
 
     @property
     def openrouter(self) -> OpenRouterClient:
@@ -92,17 +97,31 @@ class Router:
     def resolved_latest(self) -> dict[str, str]:
         return self._gemini.resolved_latest if self._gemini is not None else {}
 
+    def _default_reads_repository(self) -> bool:
+        return self._repository and self._openrouter.tools_supported(self.default_model)
+
     @property
     def surface(self) -> Surface:
-        return Surface("openrouter", False, False, self.web_default, self._gemini is not None)
+        return Surface(
+            "openrouter",
+            self._default_reads_repository(),
+            False,
+            self.web_default,
+            self._gemini is not None,
+        )
 
     def model_hint(self) -> str:
         hint = (
             f"Optional model. Omit for the default ({self.default_model}). Any OpenRouter id "
             "from list_models, e.g. deepseek/deepseek-v4.1-flash-1017, moonshotai/kimi-k3.1-pro "
-            "or x-ai/grok-4.7: conversation only, it sees this prompt and the session, not your "
-            "files or the web. "
+            "or x-ai/grok-4.7: "
         )
+        if self._default_reads_repository():
+            hint += (
+                "OpenRouter models that support tools read this repository; none have web search. "
+            )
+        else:
+            hint += "conversation only, it sees this prompt and the session, not your files or the web. "
         if self._gemini is not None:
             hint += (
                 "flash, flash-lite, pro or a gemini-* id runs on Gemini directly, which can read "

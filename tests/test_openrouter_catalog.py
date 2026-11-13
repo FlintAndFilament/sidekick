@@ -168,3 +168,20 @@ def test_privacy_sentence_with_block_does_not_say_it_may_route_to_collectors():
     assert "may route" not in on and "block_data_collection" in on
     off = privacy_sentence("x-ai/grok-4.7", PrivacyStatus.SOME_MAY_COLLECT, block=False)
     assert "may route this call" in off
+
+
+def test_tools_supported_parsed_from_supported_parameters():
+    with_tools = {**GROK, "supported_parameters": ["tools", "reasoning"]}
+    without = {**GROK, "supported_parameters": ["reasoning"]}
+    missing = {k: v for k, v in GROK.items() if k != "supported_parameters"}
+    assert P(with_tools).tools_supported is True
+    assert P(without).tools_supported is False
+    assert P(missing).tools_supported is False
+
+
+def test_free_candidates_tools_filter():
+    tooled = {**entry("acme/tooled:free", "0", "0"), "supported_parameters": ["tools"]}
+    plain = entry("acme/plain:free", "0", "0", ctx=600_000)
+    cat = oc.parse_catalog({"data": [plain, tooled]})
+    assert oc.free_candidates(cat, tools=True) == ["acme/tooled:free"]
+    assert oc.free_candidates(cat, tools=False) == ["acme/plain:free", "acme/tooled:free"]

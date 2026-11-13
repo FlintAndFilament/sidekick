@@ -24,9 +24,10 @@ Imports:  sandbox.py (DEFAULT_DENY — stdlib-only module), pydantic
 import json
 import os
 import re
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import (
     BaseModel,
@@ -112,6 +113,8 @@ class OpenRouterConfig(BaseModel):
     accepted_models: list[str] = Field(default_factory=list)
     # true = send provider.data_collection="deny" on every request.
     block_data_collection: bool = False
+    # true = the one-time "files the model reads go to the serving provider" notice was shown.
+    repo_access_notice_shown: bool = False
 
     @field_validator("default_model", "accepted_models")
     @classmethod
@@ -223,10 +226,13 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         raise ConfigError(f"Config validation failed: {exc}") from exc
 
 
-def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
-    """Record a paid OpenRouter model as accepted in config.json. Raises ConfigError.
+def _update_openrouter_section(
+    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]
+) -> None:
+    """Read config.json, apply `update` to its 'openrouter' object, write it back. Raises ConfigError.
 
-    Never overwrites a file it cannot parse; the write goes through a temp file and os.replace."""
+    Never overwrites a file it cannot parse; the write goes through a temp file and os.replace.
+    `update` returns the new section; returning it unchanged skips the write."""
     try:
         raw = json.loads(path.read_text()) if path.exists() else {}
     except json.JSONDecodeError as exc:
@@ -240,12 +246,10 @@ def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
         section = {}
     if not isinstance(section, dict):
         raise ConfigError(f"'openrouter' in {path} must be a JSON object.")
-    accepted = section.get("accepted_models", [])
-    if not isinstance(accepted, list):
-        raise ConfigError(f"'openrouter.accepted_models' in {path} must be a list.")
-    if model_id in accepted:
+    updated = update(section)
+    if updated == section:
         return
-    raw["openrouter"] = {**section, "accepted_models": [*accepted, model_id]}
+    raw["openrouter"] = updated
     tmp = path.with_name(path.name + ".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,3 +258,22 @@ def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise ConfigError(f"Config file could not be written ({path}): {exc.strerror}") from exc
+
+
+def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
+    """Record a paid OpenRouter model as accepted in config.json. Raises ConfigError."""
+
+    def add(section: dict[str, Any]) -> dict[str, Any]:
+        accepted = section.get("accepted_models", [])
+        if not isinstance(accepted, list):
+            raise ConfigError(f"'openrouter.accepted_models' in {path} must be a list.")
+        if model_id in accepted:
+            return section
+        return {**section, "accepted_models": [*accepted, model_id]}
+
+    _update_openrouter_section(path, add)
+
+
+def remember_repo_notice_shown(path: Path = CONFIG_PATH) -> None:
+    """Record that the one-time OpenRouter repository-access notice was shown. Raises ConfigError."""
+    _update_openrouter_section(path, lambda section: {**section, "repo_access_notice_shown": True})

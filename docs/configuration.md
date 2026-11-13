@@ -309,6 +309,31 @@ account has its own privacy settings: https://openrouter.ai/settings/privacy. Op
 screens all requests for abuse and keeps flagged content (since 2026-10-27), whatever sidekick's
 settings are. The setting does not apply to Gemini.
 
+**Repository files go to the provider too.** With file tools on (`file_tools.enabled`, the
+default), an OpenRouter model that supports tool calling reads repository files itself, inside
+the same sandbox Gemini uses (see [Repository access](tools.md#repository-access)). The contents
+of every file it reads, and every directory listing or search result it gets, are sent to the
+provider serving that model, under that provider's privacy status — the same status the
+first-use question shows and `list_models check=<id>` reports. `block_data_collection: true`
+therefore covers file contents as well as prompts. Files the deny-list protects (`.git`, `.env`,
+keys, credentials) are never read. Models without tool calling see only what Claude pastes. To
+keep repository files off OpenRouter entirely, set `file_tools.enabled: false` (this also turns
+file tools off for Gemini) or pass a Gemini model with `model=`.
+
+---
+
+### `openrouter.repo_access_notice_shown`
+
+**Type:** boolean
+**Default:** `false`
+
+Set to `true` by sidekick after it shows the one-time notice that files an OpenRouter model reads
+are sent to the provider serving it. The notice is prepended to the first OpenRouter reply that
+actually used file tools; models accepted before repository access existed (including the 0.6.0
+default) see it there, and new models see the same sentence in their first-use question. Set it
+back to `false` to see the notice again. If the config cannot be written, the notice is shown
+once per server run.
+
 ---
 
 ## Choosing a model

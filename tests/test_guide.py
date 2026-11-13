@@ -112,11 +112,30 @@ class TestOpenRouterSurface:
     def test_every_variant_leads_with_the_choice(self, tmp_path: Path, variant: str) -> None:
         assert _instructions(tmp_path, variant).startswith(INTRO)
 
-    def test_openrouter_instructions_say_paste_and_name_no_file_tools(self, tmp_path: Path) -> None:
+    def test_openrouter_without_tools_says_conversation_only(self, tmp_path: Path) -> None:
         text = _instructions(tmp_path, "openrouter")
-        assert "conversation only" in text
+        assert "conversation only" in text and "read this repository" not in text
+
+    def test_openrouter_instructions_say_tool_models_read_the_repo(self, tmp_path: Path) -> None:
+        text = server_instructions(
+            workspace=_workspace(tmp_path), surface=Surface("openrouter", True, False, False, True)
+        )
+        assert len(text) <= INSTRUCTIONS_BUDGET
+        assert "OpenRouter models that support tools read this repository" in text
+        assert "conversation only" not in text
         assert "list_dir" not in text and "write_file" not in text
         assert "name paths" not in text and "Gemini reads" not in text
+
+    def test_openrouter_tools_with_disabled_workspace_say_conversation_only(self) -> None:
+        # Launched from $HOME: file tools are off for the workspace even though the default
+        # model supports tools, so neither the overview nor help may claim repository access.
+        surface = Surface("openrouter", True, False, False, True)
+        workspace = _workspace(Path.home())
+        text = server_instructions(workspace=workspace, surface=surface)
+        files = help_text(workspace, topic="files", surface=surface)
+        for row in (text, files):
+            assert "read this repository" not in row
+            assert "conversation only" in row
 
     def test_openrouter_with_gemini_points_to_the_override(self, tmp_path: Path) -> None:
         text = _instructions(tmp_path, "openrouter+gemini")

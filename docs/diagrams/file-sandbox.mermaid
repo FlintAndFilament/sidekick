@@ -1,25 +1,28 @@
 flowchart TD
     S["startup: root = project_root()<br/>CLAUDE_PROJECT_DIR if a real dir, else cwd"] --> K{"file_tools.enabled=false,<br/>or root is / , home, or contains home?"}
-    K -->|yes| OFF[no registry: no file tools declared to Gemini<br/>artifacts still saved by the bridge]
+    K -->|yes| OFF[no registry: no file tools declared to any model<br/>artifacts still saved by the bridge]
     K -->|no| REG["registry per tool: list_dir, glob, grep, read_file<br/>+ write_file only for brainstorm / review / architect"]
-    REG --> CALL[Gemini requests a file-tool call]
+    REG --> TS{"Gemini, or an OpenRouter model<br/>whose catalog lists tools?"}
+    TS -->|"no (OpenRouter without tools)"| CONV[conversation only:<br/>no tools sent, reply carries a notice]
+    TS -->|yes| CALL["model requests a file-tool call<br/>(Gemini functionCall, or OpenRouter tool_calls)"]
     CALL --> W{write_file?}
     W -->|no| R["resolve(path): reject empty / NUL;<br/>normpath, must stay inside root"]
     R --> D1{"requested path or an ancestor denied?<br/>then follow symlinks: resolved path<br/>outside root or denied?"}
     DENY[["deny-list: DEFAULT_DENY (.git/**, .env*, keys, credentials…)<br/>or file_tools.deny, which replaces it<br/>case-insensitive, any depth"]] -.-> D1
     DENY -.-> RW
-    D1 -->|yes| REJ["{error: 'rejected: …'} back to Gemini"]
+    D1 -->|yes| REJ["{error: 'rejected: …'} back to the model"]
     D1 -->|no| OP{which tool?}
     OP -->|list_dir| L[entries minus denied ones<br/>max 500]
     OP -->|glob / grep| WALK["walk: skip .git .venv venv node_modules __pycache__<br/>dist build .mypy_cache .ruff_cache .pytest_cache,<br/>denied paths, symlinked dirs, escaping file links"]
     WALK --> GG["glob: max 500 results<br/>grep: binary files skipped, lines over 2,000 chars skipped,<br/>max 200 matches / 5,000 files / 20 MiB / 10 s"]
     OP -->|read_file| RF["refuse over 20 MiB or binary (NUL in first 8 KiB);<br/>cat -n numbered, max 256 KiB returned"]
     W -->|yes| CAP{"content over max_write_bytes?<br/>default 256 KiB, checked first"}
-    CAP -->|yes| ERR["{error: ValueError …} back to Gemini"]
+    CAP -->|yes| ERR["{error: ValueError …} back to the model"]
     CAP -->|no| RW["resolve_for_write(path): inside root, not root itself;<br/>parent resolved; final symlink NOT followed;<br/>deny checked on path, parent, target; not a dir"]
     RW -->|fails| REJ
     RW -->|ok| WR["mkdir parents; temp file + os.replace<br/>anywhere under root, keeps permission bits"]
-    L --> RES[result dict back to Gemini<br/>truncated=true when a cap hit]
+    L --> RES[result dict back to the model<br/>truncated=true when a cap hit]
     GG --> RES
     RF --> RES
     WR --> RES
+    RES -.->|"OpenRouter: contents go to<br/>the serving provider"| PROV[("provider serving the model")]

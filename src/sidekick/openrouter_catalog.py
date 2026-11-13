@@ -122,6 +122,7 @@ class ORModel:
     input_modalities: tuple[str, ...]
     output_modalities: tuple[str, ...]
     reasoning_supported: bool
+    tools_supported: bool
     reasoning_mandatory: bool
     supported_efforts: tuple[str, ...]
 
@@ -177,6 +178,7 @@ def parse_model(raw: Mapping[str, Any]) -> Optional[ORModel]:
         input_modalities=_strings(arch.get("input_modalities")),
         output_modalities=_strings(arch.get("output_modalities")),
         reasoning_supported="reasoning" in _strings(raw.get("supported_parameters")),
+        tools_supported="tools" in _strings(raw.get("supported_parameters")),
         reasoning_mandatory=reasoning.get("mandatory") is True,
         supported_efforts=_strings(reasoning.get("supported_efforts")),
     )
@@ -217,9 +219,11 @@ def format_context(tokens: Optional[int]) -> str:
     return f"{tokens // 1000}k"
 
 
-def free_candidates(catalog: Sequence[ORModel]) -> list[str]:
-    """Free text-chat model ids: the preferred ones first, then the rest by context size."""
-    free = {m.id: m for m in catalog if m.free and m.text_chat}
+def free_candidates(catalog: Sequence[ORModel], *, tools: bool = False) -> list[str]:
+    """Free text-chat model ids: the preferred ones first, then the rest by context size.
+
+    With tools=True only models that accept tool definitions are kept."""
+    free = {m.id: m for m in catalog if m.free and m.text_chat and (m.tools_supported or not tools)}
     preferred = [i for i in FREE_PREFERENCES if i in free]
     rest = sorted(
         (m for i, m in free.items() if i not in preferred),
@@ -336,13 +340,25 @@ def subject_phrase(model_id: str, entry: Optional[ORModel]) -> str:
     return f"`{model_id}` (price not shown in OpenRouter's catalog: see {model_page(model_id)})"
 
 
+REPO_ACCESS_SENTENCE = (
+    "With repository access on, the files it reads are sent to the provider serving it."
+)
+
+
 def acceptance_question(
-    model_id: str, entry: Optional[ORModel], status: PrivacyStatus, *, block: bool
+    model_id: str,
+    entry: Optional[ORModel],
+    status: PrivacyStatus,
+    *,
+    block: bool,
+    repo_access: bool = True,
 ) -> str:
     question = (
         f"Use {subject_phrase(model_id, entry)}? {privacy_sentence(model_id, status, block=block)}"
     )
-    return question + " " + FREE_LIMITS if is_free(model_id) else question
+    if is_free(model_id):
+        question += " " + FREE_LIMITS
+    return question + " " + REPO_ACCESS_SENTENCE if repo_access else question
 
 
 def first_use_notice(
@@ -352,6 +368,7 @@ def first_use_notice(
     *,
     block: bool,
     forced_deny: bool = False,
+    repo_access: bool = True,
 ) -> str:
     if forced_deny and status is PrivacyStatus.SOME_MAY_COLLECT:
         privacy = "Some providers serving it may store or train on your prompts."
@@ -363,9 +380,10 @@ def first_use_notice(
         if forced_deny
         else ""
     )
+    repo = " " + REPO_ACCESS_SENTENCE if repo_access else ""
     return (
         f"[sidekick notice] First use of {subject_phrase(model_id, entry)}. "
-        f"{privacy}{limits}{forced} Shown once; accept it in /sidekick:setup to skip this.\n\n"
+        f"{privacy}{limits}{forced}{repo} Shown once; accept it in /sidekick:setup to skip this.\n\n"
     )
 
 

@@ -79,14 +79,22 @@ def _openrouter(surface: Optional[Surface]) -> bool:
     return surface is not None and surface.primary == "openrouter"
 
 
-_OR_ACCESS = (
+_OR_ACCESS_FILES = (
     "Repository: OpenRouter models that support tools read this repository; for others, paste "
     "the code."
+)
+_OR_ACCESS = (
+    "Repository: the default model runs on OpenRouter and is conversation only, so paste the "
+    "code it needs."
 )
 _OR_GEMINI_ACCESS = (
     " model=flash, flash-lite, pro or gemini-* runs on Gemini, which reads repository files itself."
 )
 _OR_WEB = "Web: none for OpenRouter models; web=true is ignored with a notice."
+
+
+def _or_access(surface: Optional[Surface]) -> str:
+    return _OR_ACCESS_FILES if surface is not None and surface.files else _OR_ACCESS
 
 
 def _writes_possible(workspace: Optional[Workspace]) -> bool:
@@ -115,7 +123,7 @@ def _short_deny(workspace: Workspace) -> str:
 def _short_access(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
     if _openrouter(surface):
         gemini = surface is not None and surface.gemini_available and _writes_possible(workspace)
-        return _OR_ACCESS + (_OR_GEMINI_ACCESS if gemini else "")
+        return _or_access(surface) + (_OR_GEMINI_ACCESS if gemini else "")
     if workspace is None:
         return "Repository: OFF. Gemini cannot read your files, so paste what it needs."
     if not workspace.tools_enabled:
@@ -256,7 +264,7 @@ def _readable_but_skipped(workspace: Workspace) -> str:
 def _files_topic(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
     """The read/write rows, built from each tool module's declared capability (#74)."""
     if _openrouter(surface):
-        text = _OR_ACCESS.removeprefix("Repository: ")
+        text = _or_access(surface).removeprefix("Repository: ")
         text = "Repository access: " + text[0].upper() + text[1:]
         if surface is None or not surface.gemini_available:
             return text

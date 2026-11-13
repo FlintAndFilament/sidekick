@@ -7,7 +7,7 @@ from sidekick.client import ClientError, GeminiClient
 from sidekick.config import Config
 from sidekick.models import is_openrouter_id
 from sidekick.router import Router, route
-from tests._openrouter_fixtures import FakeOpenRouter, make_client
+from tests._openrouter_fixtures import FakeOpenRouter, entry, make_client
 
 
 def _gemini() -> GeminiClient:
@@ -80,10 +80,12 @@ def test_sessions_merge_most_recent_first(tmp_path):
 def test_model_hint(tmp_path):
     o = make_client(FakeOpenRouter(), tmp_path)
     assert "x-ai/grok-4.7" in Router(o).model_hint()
-    assert "OpenRouter models that support tools read this repository; none have web." in (
-        Router(o).model_hint()
-    )
-    assert "conversation only" not in Router(o).model_hint()
+    assert "conversation only" in Router(o).model_hint()
+    assert "read this repository" not in Router(o).model_hint()
+    tooled = make_client(FakeOpenRouter(catalog=[entry(o.default_model, tools=True)]), tmp_path)
+    hint = Router(tooled).model_hint()
+    assert "OpenRouter models that support tools read this repository; none have web" in hint
+    assert "conversation only" not in hint
     assert "google/<id> through OpenRouter" in Router(o).model_hint()
     assert "runs on Gemini directly" in Router(o, _gemini()).model_hint()
     assert Router(o).model_hint().endswith(" list_models shows prices.")

@@ -112,8 +112,15 @@ class TestOpenRouterSurface:
     def test_every_variant_leads_with_the_choice(self, tmp_path: Path, variant: str) -> None:
         assert _instructions(tmp_path, variant).startswith(INTRO)
 
-    def test_openrouter_instructions_say_tool_models_read_the_repo(self, tmp_path: Path) -> None:
+    def test_openrouter_without_tools_says_conversation_only(self, tmp_path: Path) -> None:
         text = _instructions(tmp_path, "openrouter")
+        assert "conversation only" in text and "read this repository" not in text
+
+    def test_openrouter_instructions_say_tool_models_read_the_repo(self, tmp_path: Path) -> None:
+        text = server_instructions(
+            workspace=_workspace(tmp_path), surface=Surface("openrouter", True, False, False, True)
+        )
+        assert len(text) <= INSTRUCTIONS_BUDGET
         assert "OpenRouter models that support tools read this repository" in text
         assert "conversation only" not in text
         assert "list_dir" not in text and "write_file" not in text

@@ -100,7 +100,7 @@ async def run_openai_tool_loop(
             name = function.get("name") or ""
             args = _parse_arguments(function.get("arguments"))
             if args is None:
-                _log.info("tool %s: arguments were not a JSON object", name)
+                _log.info("tool %.64r: arguments were not a JSON object", name)
                 result: dict[str, Any] = {"error": _BAD_ARGUMENTS}
                 args = {}
             else:

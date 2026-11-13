@@ -193,31 +193,8 @@ def _start() -> "Optional[FastMCP]":
                 ", ".join(f"{family}={mid}" for family, mid in latest.items())
                 or "unresolved (pinned)",
             )
-    source: ModelSource
-    if or_key is not None:
-        openrouter = OpenRouterClient(config, or_key)
-        openrouter.refresh_catalog()
-        source = Router(openrouter, gemini, gemini_problem)
-    else:
-        assert gemini is not None
-        source = gemini
-    _log.info(
-        "starting — primary=%s default_model=%s gemini=%s",
-        source.surface.primary,
-        source.default_model,
-        "on" if gemini is not None else ("unavailable" if gemini_problem else "off"),
-    )
 
     root = project_root()
-
-    try:
-        transcript = TranscriptWriter(config.transcript_dir, startup_time, base=root)
-    except TranscriptError as exc:
-        _log.error("startup failed — %s", exc)
-        _serve_setup_problem(f"transcript_dir: {exc}")
-        return None
-
-    _log.info("transcript → %s", transcript.path)
 
     try:
         workspace = build_workspace(config, root)
@@ -231,6 +208,30 @@ def _start() -> "Optional[FastMCP]":
         workspace.sandbox.root,
         workspace.artifacts.directory,
     )
+
+    source: ModelSource
+    if or_key is not None:
+        openrouter = OpenRouterClient(config, or_key)
+        openrouter.refresh_catalog()
+        source = Router(openrouter, gemini, gemini_problem, repository=workspace.tools_enabled)
+    else:
+        assert gemini is not None
+        source = gemini
+    _log.info(
+        "starting — primary=%s default_model=%s gemini=%s",
+        source.surface.primary,
+        source.default_model,
+        "on" if gemini is not None else ("unavailable" if gemini_problem else "off"),
+    )
+
+    try:
+        transcript = TranscriptWriter(config.transcript_dir, startup_time, base=root)
+    except TranscriptError as exc:
+        _log.error("startup failed — %s", exc)
+        _serve_setup_problem(f"transcript_dir: {exc}")
+        return None
+
+    _log.info("transcript → %s", transcript.path)
 
     return build_server(source, transcript, workspace)
 

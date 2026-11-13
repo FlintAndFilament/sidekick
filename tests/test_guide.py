@@ -126,6 +126,17 @@ class TestOpenRouterSurface:
         assert "list_dir" not in text and "write_file" not in text
         assert "name paths" not in text and "Gemini reads" not in text
 
+    def test_openrouter_tools_with_disabled_workspace_say_conversation_only(self) -> None:
+        # Launched from $HOME: file tools are off for the workspace even though the default
+        # model supports tools, so neither the overview nor help may claim repository access.
+        surface = Surface("openrouter", True, False, False, True)
+        workspace = _workspace(Path.home())
+        text = server_instructions(workspace=workspace, surface=surface)
+        files = help_text(workspace, topic="files", surface=surface)
+        for row in (text, files):
+            assert "read this repository" not in row
+            assert "conversation only" in row
+
     def test_openrouter_with_gemini_points_to_the_override(self, tmp_path: Path) -> None:
         text = _instructions(tmp_path, "openrouter+gemini")
         assert "model=flash, flash-lite, pro or gemini-* runs on Gemini" in text

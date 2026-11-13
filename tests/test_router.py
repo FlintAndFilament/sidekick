@@ -89,3 +89,16 @@ def test_model_hint(tmp_path):
     assert "google/<id> through OpenRouter" in Router(o).model_hint()
     assert "runs on Gemini directly" in Router(o, _gemini()).model_hint()
     assert Router(o).model_hint().endswith(" list_models shows prices.")
+
+
+def test_disabled_workspace_drops_the_repository_claim(tmp_path):
+    # file_tools.enabled is true and the default model supports tools, but the workspace is
+    # off (e.g. launched from $HOME), so the surface and model hint must say conversation only.
+    default = make_client(FakeOpenRouter(), tmp_path).default_model
+    o = make_client(FakeOpenRouter(catalog=[entry(default, tools=True)]), tmp_path)
+    r = Router(o, repository=False)
+    assert o.tools_supported(o.default_model)
+    assert r.surface.files is False
+    hint = r.model_hint()
+    assert "read this repository" not in hint
+    assert "conversation only" in hint

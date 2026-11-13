@@ -557,6 +557,14 @@ wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run
   question for a new model says so, and the first reply that actually used file tools carries a
   one-time notice (remembered as
   [`openrouter.repo_access_notice_shown`](configuration.md#openrouterrepo_access_notice_shown)).
+- **Thinking models are not yet verified.** Tool use over several rounds is verified on the
+  default free model. Thinking models that need their reasoning state sent back between tool
+  rounds (for example Gemini 3 through OpenRouter, `google/gemini-3*`) are not yet verified and
+  may fail on the second tool round. For those, use `model=flash` or `model=pro`, which runs on
+  Gemini directly when Gemini is configured.
+- **File tools off means conversation only.** When the server runs with file tools off (launched
+  from your home directory or the filesystem root, or `file_tools.enabled=false`), no OpenRouter
+  model gets them, and the model hint and instructions say so.
 
 **No web.** OpenRouter models have no web search: `web=true` is ignored with a notice. Gemini
 models (`flash`, `flash-lite`, `pro`, `gemini-*`) keep web access.

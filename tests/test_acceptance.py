@@ -8,6 +8,7 @@ from mcp.server.fastmcp import Context
 
 from sidekick.backends import Preflight
 from sidekick.openrouter import OpenRouterError
+from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE, unattended_paid_refused_message
 from sidekick.tools.base import _AcceptForm, elicitor
 from tests._openrouter_fixtures import DATA_POLICY_404, FakeOpenRouter, make_client, reply
 
@@ -28,7 +29,7 @@ async def test_unaccepted_paid_model_asks_with_price_and_privacy(tmp_path):
     fake = FakeOpenRouter(replies=[(200, reply())])
     c = make_client(fake, tmp_path)
     elicit, asked = _asker("accept")
-    assert await c.preflight(GROK, elicit) == Preflight(proceed=True)
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True)
     assert asked == [
         "Use `x-ai/grok-4.7` at $2.00 in / $6.00 out per 1M tokens? Some providers serving it "
         "may store or train on your prompts, and OpenRouter may route this call to one of them. "
@@ -37,14 +38,15 @@ async def test_unaccepted_paid_model_asks_with_price_and_privacy(tmp_path):
     assert json.loads((tmp_path / "config.json").read_text())["openrouter"]["accepted_models"] == [
         GROK
     ]
-    assert await c.preflight(GROK, elicit) == Preflight(proceed=True)
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True)
     assert len(asked) == 1 and len(fake.posts) == 1  # not asked or probed again
 
 
 async def test_models_accepted_in_config_skip_everything(tmp_path):
     fake = FakeOpenRouter()
     c = make_client(fake, tmp_path, accepted_models=[GROK])
-    assert await c.preflight(GROK, None) == Preflight(proceed=True) and fake.posts == []
+    assert await c.preflight(GROK, None) == Preflight(proceed=True, tools=False)
+    assert fake.posts == []
 
 
 @pytest.mark.parametrize(
@@ -60,26 +62,111 @@ async def test_decline_and_cancel_send_nothing(tmp_path, outcome, phrase):
         assert "/sidekick:setup" in pre.message
 
 
-async def test_unavailable_proceeds_with_a_one_time_notice(tmp_path):
+async def test_unattended_free_model_proceeds_with_a_one_time_notice(tmp_path):
     c = make_client(FakeOpenRouter(replies=[(200, reply())]), tmp_path)
-    first, second = await c.preflight(GROK, None), await c.preflight(GROK, None)
+    first, second = await c.preflight(NEMO, None), await c.preflight(NEMO, None)
     assert first.proceed and first.notice.startswith(
-        "[sidekick notice] First use of `x-ai/grok-4.7` at $2.00 in / $6.00 out per 1M tokens."
+        f"[sidekick notice] First use of the free model `{NEMO}`."
     )
     assert "Sent with privacy-only routing" in first.notice
     assert "may route this call" not in first.notice  # the notice must not contradict itself
-    assert second == Preflight(proceed=True) and not (tmp_path / "config.json").exists()
+    assert second == Preflight(proceed=True, tools=False)
+    assert not (tmp_path / "config.json").exists()
 
 
-async def test_unattended_send_forces_deny_routing(tmp_path):  # owner 2026-11-11
+async def test_unattended_paid_model_is_refused_and_nothing_is_sent(tmp_path):  # #141
     fake = FakeOpenRouter(replies=[(200, reply()), (200, reply())])
     c = make_client(fake, tmp_path)
-    assert (await c.preflight(GROK, None)).proceed
-    await c.ask(c.get_or_create_session("ask:s", GROK), "hi")
+    pre = await c.preflight(GROK, None, want_tools=True)
+    assert pre == Preflight(proceed=False, message=unattended_paid_refused_message(GROK))
+    assert pre.message == (
+        "[sidekick] Not sent: `x-ai/grok-4.7` is a paid model and sidekick couldn't ask you to "
+        "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models in "
+        "~/.config/sidekick/config.json."
+    )
+    assert len(fake.posts) <= 1  # at most the privacy probe; no chat request
+    assert all(p["max_tokens"] == 16 for p in fake.posts)
+    assert not (await c.preflight(GROK, None)).proceed  # still refused next time
+    assert not (tmp_path / "config.json").exists()
+
+
+async def test_unattended_free_send_forces_deny_routing_without_file_tools(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply()), (200, reply())])  # owner 2026-11-11
+    c = make_client(fake, tmp_path)
+    pre = await c.preflight(NEMO, None, want_tools=True)
+    assert pre.proceed and pre.tools is False
+    assert REPO_ACCESS_SENTENCE not in pre.notice  # no file tools, so no repository claim
+    await c.ask(c.get_or_create_session("ask:s", NEMO), "hi")
     assert len(fake.posts) == 2  # the privacy probe, then the chat request
     chat = fake.posts[1]
     assert chat["messages"][-1]["content"] == "hi"
     assert chat["provider"] == {"data_collection": "deny"}
+
+
+async def test_first_use_accept_with_tools_records_both_lists_in_one_question(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    c = make_client(fake, tmp_path)
+    elicit, asked = _asker("accept")
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True, tools=True)
+    assert len(asked) == 1 and REPO_ACCESS_SENTENCE in asked[0]
+    section = json.loads((tmp_path / "config.json").read_text())["openrouter"]
+    assert section["accepted_models"] == [GROK] and section["repo_access_models"] == [GROK]
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True, tools=True)
+    assert len(asked) == 1
+
+
+async def test_first_use_without_tools_does_not_ask_about_the_repository(tmp_path):
+    c = make_client(FakeOpenRouter(replies=[(200, reply())]), tmp_path)
+    elicit, asked = _asker("accept")
+    assert await c.preflight(GROK, elicit) == Preflight(proceed=True, tools=False)
+    assert REPO_ACCESS_SENTENCE not in asked[0]
+    section = json.loads((tmp_path / "config.json").read_text())["openrouter"]
+    assert section == {"accepted_models": [GROK]}
+
+
+async def test_accepted_model_gets_a_repository_question_and_accept_is_remembered(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    c = make_client(fake, tmp_path, accepted_models=[GROK])
+    elicit, asked = _asker("accept")
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True, tools=True)
+    assert asked == [
+        "Let `x-ai/grok-4.7` at $2.00 in / $6.00 out per 1M tokens read files in this "
+        "repository? Files it reads are sent to the provider serving it. Some providers serving "
+        "it may store or train on your prompts, and OpenRouter may route this call to one of them."
+    ]
+    section = json.loads((tmp_path / "config.json").read_text())["openrouter"]
+    assert section == {"repo_access_models": [GROK]}
+    assert await c.preflight(GROK, elicit, want_tools=True) == Preflight(proceed=True, tools=True)
+    assert len(asked) == 1
+    fresh = make_client(
+        FakeOpenRouter(), tmp_path, accepted_models=[GROK], repo_access_models=[GROK]
+    )
+    assert await fresh.preflight(GROK, None, want_tools=True) == Preflight(proceed=True, tools=True)
+
+
+@pytest.mark.parametrize("outcome", ["decline", "cancel"])
+async def test_repository_decline_runs_without_tools_and_is_not_asked_again(tmp_path, outcome):
+    c = make_client(FakeOpenRouter(replies=[(200, reply())]), tmp_path, accepted_models=[GROK])
+    elicit, asked = _asker(outcome)
+    want = Preflight(proceed=True, tools=False)
+    assert await c.preflight(GROK, elicit, want_tools=True) == want
+    assert await c.preflight(GROK, elicit, want_tools=True) == want
+    assert len(asked) == 1 and not (tmp_path / "config.json").exists()
+
+
+async def test_repository_question_unavailable_runs_without_tools(tmp_path):
+    c = make_client(FakeOpenRouter(replies=[(200, reply())]), tmp_path, accepted_models=[GROK])
+    elicit, asked = _asker("unavailable")
+    want = Preflight(proceed=True, tools=False)
+    assert await c.preflight(GROK, elicit, want_tools=True) == want
+    assert await c.preflight(GROK, None, want_tools=True) == want
+    assert not (tmp_path / "config.json").exists()
+
+
+async def test_repository_access_alone_does_not_count_as_acceptance(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    c = make_client(fake, tmp_path, repo_access_models=[GROK])
+    assert not (await c.preflight(GROK, None, want_tools=True)).proceed
 
 
 @pytest.mark.parametrize(
@@ -94,7 +181,7 @@ async def test_unattended_refuses_when_providers_may_collect_or_unknown(tmp_path
 async def test_free_model_question_has_privacy_and_limits_but_no_price(tmp_path):
     elicit, asked = _asker("accept")
     await make_client(FakeOpenRouter(replies=[(404, DATA_POLICY_404)]), tmp_path).preflight(
-        NEMO, elicit
+        NEMO, elicit, want_tools=True
     )
     assert asked == [
         f"Use the free model `{NEMO}`? Every provider serving it may store or train on your "

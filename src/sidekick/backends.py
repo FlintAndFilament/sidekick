@@ -55,11 +55,14 @@ Elicit = Callable[[str], Awaitable[ElicitOutcome]]
 
 @dataclass(frozen=True)
 class Preflight:
-    """Result of a backend's pre-call check: go ahead (maybe with a notice) or stop with a message."""
+    """Result of a backend's pre-call check: go ahead (maybe with a notice) or stop with a message.
+
+    `tools` says whether this call may carry the repository file tools."""
 
     proceed: bool
     notice: str = ""
     message: str = ""
+    tools: bool = True
 
 
 @dataclass(frozen=True)
@@ -104,9 +107,9 @@ class Backend(Protocol):
 
     def can_fall_back(self, exc: ClientError) -> bool: ...
 
-    async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight: ...
-
-    def take_repo_notice(self) -> str: ...
+    async def preflight(
+        self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
+    ) -> Preflight: ...
 
     async def ask(
         self,

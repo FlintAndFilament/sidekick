@@ -10,7 +10,7 @@ from sidekick.config import (
     load_config,
     openrouter_api_key,
     remember_accepted_model,
-    remember_repo_notice_shown,
+    remember_repo_access,
 )
 from tests._fakes import FAKE_OPENROUTER_KEY
 
@@ -113,28 +113,39 @@ def test_remember_never_clobbers_an_unreadable_file(tmp_path):
     assert path.read_text() == "{not json"
 
 
-def test_remember_repo_notice_shown_sets_flag_and_keeps_other_keys(tmp_path):
+def test_remember_repo_access_adds_once_and_keeps_other_keys(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(
-        json.dumps(
-            {
-                "project": "p",
-                "openrouter": {"accepted_models": ["x-ai/grok-4.7"]},
-            }
-        )
+        json.dumps({"project": "p", "openrouter": {"accepted_models": ["x-ai/grok-4.7"]}})
     )
-    remember_repo_notice_shown(path)
+    remember_repo_access("x-ai/grok-4.7", path)
+    remember_repo_access("x-ai/grok-4.7", path)
     assert json.loads(path.read_text()) == {
         "project": "p",
-        "openrouter": {"accepted_models": ["x-ai/grok-4.7"], "repo_access_notice_shown": True},
+        "openrouter": {
+            "accepted_models": ["x-ai/grok-4.7"],
+            "repo_access_models": ["x-ai/grok-4.7"],
+        },
     }
-    assert OpenRouterConfig().repo_access_notice_shown is False
+    assert OpenRouterConfig().repo_access_models == []
     assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]
 
 
-def test_remember_repo_notice_shown_refuses_unparseable_file(tmp_path):
+def test_remember_repo_access_refuses_unparseable_file(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{not json")
     with pytest.raises(ConfigError):
-        remember_repo_notice_shown(path)
+        remember_repo_access("x-ai/grok-4.7", path)
     assert path.read_text() == "{not json"
+
+
+def test_repo_access_models_must_be_model_ids():
+    with pytest.raises(ValueError):
+        OpenRouterConfig(repo_access_models=["sk-or-v1-not-a-model"])
+
+
+def test_deprecated_repo_notice_flag_still_loads():
+    cfg = Config.model_validate(
+        {"openrouter": {"repo_access_notice_shown": True}}, context={"openrouter_key": True}
+    )
+    assert cfg.openrouter.repo_access_models == []

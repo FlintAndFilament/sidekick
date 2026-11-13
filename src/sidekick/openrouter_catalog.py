@@ -361,6 +361,16 @@ def acceptance_question(
     return question + " " + REPO_ACCESS_SENTENCE if repo_access else question
 
 
+def repo_access_question(
+    model_id: str, entry: Optional[ORModel], status: PrivacyStatus, *, block: bool = False
+) -> str:
+    """The question asked the first time an already-accepted model would read repository files."""
+    return (
+        f"Let {subject_phrase(model_id, entry)} read files in this repository? Files it reads "
+        f"are sent to the provider serving it. {privacy_sentence(model_id, status, block=block)}"
+    )
+
+
 def first_use_notice(
     model_id: str,
     entry: Optional[ORModel],
@@ -384,6 +394,14 @@ def first_use_notice(
     return (
         f"[sidekick notice] First use of {subject_phrase(model_id, entry)}. "
         f"{privacy}{limits}{forced}{repo} Shown once; accept it in /sidekick:setup to skip this.\n\n"
+    )
+
+
+def unattended_paid_refused_message(model: str) -> str:
+    return (
+        f"[sidekick] Not sent: `{model}` is a paid model and sidekick couldn't ask you to "
+        "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models "
+        "in ~/.config/sidekick/config.json."
     )
 
 

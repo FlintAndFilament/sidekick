@@ -12,7 +12,7 @@ from sidekick.config import Config
 from sidekick.router import Router
 from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini
 from sidekick.transcript import TranscriptWriter
-from tests._openrouter_fixtures import FakeOpenRouter, make_client, reply
+from tests._openrouter_fixtures import CATALOG, FakeOpenRouter, make_client, reply, tool_reply
 from tests.test_capability_metadata import _workspace
 from tests.test_tools import _register_all_tools, _text_response
 
@@ -30,10 +30,35 @@ def _gemini() -> tuple[GeminiClient, AsyncMock]:
     return g, gen
 
 
+def _files_notice(model: str) -> str:
+    return (
+        f"[sidekick notice] `{model}` can't use tools, so it could not read repository files: it "
+        "saw only this prompt and the session's earlier turns. Paste the code, or pick a "
+        "tool-capable model (list_models).\n\n"
+    )
+
+
+def _with_tools(*ids: str) -> list[dict[str, Any]]:
+    """The fixture catalog with `ids` marked as accepting tool definitions."""
+    return [
+        {**e, "supported_parameters": [*e["supported_parameters"], "tools"]}
+        if e["id"] in ids
+        else e
+        for e in CATALOG
+    ]
+
+
 def _router(
-    tmp_path: Path, replies: list[tuple[int, Any]], *, accepted_models: list[str], **openrouter: Any
+    tmp_path: Path,
+    replies: list[tuple[int, Any]],
+    *,
+    accepted_models: list[str],
+    catalog: list[dict[str, Any]] | None = None,
+    **openrouter: Any,
 ) -> tuple[Router, FakeOpenRouter, AsyncMock]:
     fake = FakeOpenRouter(replies=replies)
+    if catalog is not None:
+        fake.catalog = catalog
     o = make_client(fake, tmp_path, accepted_models=accepted_models, **openrouter)
     g, gen = _gemini()
     return Router(o, g), fake, gen
@@ -72,7 +97,8 @@ def _transcript_written(tmp_path: Path) -> bool:
 async def test_default_call_goes_to_openrouter_without_file_tools(tmp_path):
     r, fake, gen = _router(tmp_path, [(200, reply())], accepted_models=[NEMO])
     answer = await _call(r, tmp_path, model=None)
-    assert answer == "fine"
+    assert answer.startswith(f"[sidekick notice] `{NEMO}` can't use tools")
+    assert answer.endswith("fine")
     assert len(fake.posts) == 1 and fake.posts[0]["model"] == NEMO
     system = fake.posts[0]["messages"][0]
     assert system["role"] == "system" and "list_dir" not in system["content"]
@@ -92,16 +118,75 @@ async def test_gemini_alias_goes_to_gemini_with_file_tools(tmp_path):
 async def test_per_call_openrouter_model_notes_it_could_not_read_files(tmp_path):
     r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[GROK])
     answer = await _call(r, tmp_path, model=GROK)
-    assert answer.startswith(
-        "[sidekick notice] `x-ai/grok-4.7` runs on OpenRouter and could not read repository files"
-    )
+    assert answer.startswith(_files_notice(GROK))
     assert answer.endswith("fine") and fake.posts[0]["model"] == GROK
 
 
-async def test_omitted_model_has_no_files_notice(tmp_path):
-    r, _, _ = _router(tmp_path, [(200, reply())], accepted_models=[NEMO])
+async def test_openrouter_non_tool_model_gets_notice_even_without_model_arg(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[NEMO])
     answer = await _call(r, tmp_path, model=None)
-    assert "could not read repository files" not in answer
+    assert answer.startswith(f"[sidekick notice] `{NEMO}` can't use tools")
+    assert answer.endswith("fine") and "tools" not in fake.posts[0]
+
+
+async def test_openrouter_tool_capable_model_gets_registry_and_preamble(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())], accepted_models=[NEMO], catalog=_with_tools(NEMO)
+    )
+    answer = await _call(r, tmp_path, model=None)
+    assert answer == "fine"
+    post = fake.posts[0]
+    assert post["model"] == NEMO
+    assert "list_dir" in {t["function"]["name"] for t in post["tools"]}
+    assert "write_file" not in {t["function"]["name"] for t in post["tools"]}
+    assert "list_dir, glob, grep, and read_file" in post["messages"][0]["content"]
+
+
+async def test_openrouter_tool_capable_fallback_fails_over_to_non_tool_model(tmp_path):
+    """The fallback gets its own decision: no tools, no preamble, and the files notice."""
+    script = [RATE_LIMITED, RATE_LIMITED, (200, reply())]
+    r, fake, _ = _router(tmp_path, script, accepted_models=[NEMO, GEMMA], catalog=_with_tools(NEMO))
+    answer = await _call(r, tmp_path)
+    assert [p["model"] for p in fake.posts] == [NEMO, NEMO, GEMMA]
+    assert "tools" in fake.posts[0] and "tools" not in fake.posts[2]
+    assert "list_dir" not in fake.posts[2]["messages"][0]["content"]
+    assert f"[sidekick notice] `{GEMMA}` can't use tools" in answer
+    assert f"`{NEMO}` can't use tools" not in answer and answer.endswith("fine")
+
+
+async def test_fallback_after_tool_rounds_keeps_records(tmp_path):
+    """The primary 429s on round 2: its round-1 call, the marker, then the fallback's calls."""
+    (tmp_path / "a.txt").write_text("alpha")
+    (tmp_path / "b.txt").write_text("beta")
+    script = [
+        (200, tool_reply(("read_file", '{"path": "a.txt"}'))),
+        RATE_LIMITED,
+        RATE_LIMITED,
+        (200, tool_reply(("read_file", '{"path": "b.txt"}'))),
+        (200, reply()),
+    ]
+    r, fake, _ = _router(
+        tmp_path, script, accepted_models=[NEMO, GEMMA], catalog=_with_tools(NEMO, GEMMA)
+    )
+    answer = await _call(r, tmp_path)
+    assert [p["model"] for p in fake.posts] == [NEMO, NEMO, NEMO, GEMMA, GEMMA]
+    assert f"fallback model '{GEMMA}'" in answer and answer.endswith("fine")
+    assert "can't use tools" not in answer
+    text = next((tmp_path / "t").iterdir()).read_text()
+    calls = text.split("**Tool calls:**\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert calls[0].startswith("- → read_file(path='a.txt')")
+    assert calls[1] == f"- — {NEMO} unavailable; retried on fallback model {GEMMA} —"
+    assert calls[2].startswith("- → read_file(path='b.txt')")
+    assert len(calls) == 3
+
+
+async def test_gemini_path_unchanged(tmp_path):
+    r, fake, gen = _router(tmp_path, [(200, reply())], accepted_models=[NEMO])
+    answer = await _call(r, tmp_path, model="flash")
+    assert answer == "from gemini" and fake.posts == []
+    config = gen.call_args.kwargs["config"]
+    assert "list_dir, glob, grep, and read_file" in config.system_instruction
+    assert "write_file" not in {d.name for d in config.tools[0].function_declarations}
 
 
 async def test_declined_model_sends_nothing_and_logs_nothing(tmp_path):
@@ -179,7 +264,7 @@ async def test_rotated_default_is_preflighted_before_send(tmp_path):
 
     answer = await _call(r, tmp_path, elicit=elicit)
     assert [m for q in asked for m in (NEMO, GEMMA, INKLING) if m in q] == [NEMO, GEMMA, INKLING]
-    assert answer == "fine"
+    assert answer == _files_notice(INKLING) + "fine"  # the notice names the model sent to
     assert [p["model"] for p in fake.posts] == [NEMO, GEMMA, INKLING, INKLING]
     assert [p["max_tokens"] == 16 for p in fake.posts] == [True, True, True, False]
 

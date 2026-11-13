@@ -213,7 +213,8 @@ class OpenRouterClient:
 
     @property
     def supports_files(self) -> bool:
-        return False
+        # True for the backend; whether a given model gets the file tools is tools_supported().
+        return True
 
     @property
     def web_supported(self) -> bool:

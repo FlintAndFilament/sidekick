@@ -554,10 +554,10 @@ wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run
   tool-capable model. The same happens when the catalog could not be loaded (tool support
   unknown).
 - **Asked first.** Files the model reads are sent to the provider serving it, so a model gets the
-  file tools only after you agree, per model. A new model's first-use question says so and one
-  yes covers both; an already-accepted model is asked once before its first call with file tools.
+  file tools only after you agree, per model: it is asked once, as its own question, before its
+  first call with file tools (for a new model, right after the price and privacy question).
   Saying no, or running unattended, sends the call without file tools, and the reply starts with
-  a notice saying so. Agreed models are remembered in
+  a notice saying which. Agreed models are remembered in
   [`openrouter.repo_access_models`](configuration.md#openrouterrepo_access_models).
 - **Thinking models are not yet verified.** Tool use over several rounds is verified on the
   default free model. Thinking models that need their reasoning state sent back between tool

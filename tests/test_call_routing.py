@@ -4,14 +4,15 @@ import asyncio
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from sidekick.client import GEMINI_UNPAID_NOTICE, GeminiClient
 from sidekick.config import Config
-from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE
+from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE, unattended_paid_refused_message
 from sidekick.router import Router
-from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini
+from sidekick.tools.base import _MAX_PREFLIGHTS, call_gemini, elicitor
 from sidekick.transcript import TranscriptWriter
 from tests._openrouter_fixtures import CATALOG, FakeOpenRouter, make_client, reply, tool_reply
 from tests.test_capability_metadata import _workspace
@@ -41,9 +42,23 @@ def _files_notice(model: str) -> str:
 
 def _declined_notice(model: str) -> str:
     return (
-        f"[sidekick notice] Repository access for `{model}` wasn't accepted, so it saw only this "
+        f"[sidekick notice] You declined repository access for `{model}`, so it saw only this "
         "prompt and the session's earlier turns.\n\n"
     )
+
+
+def _unasked_notice(model: str) -> str:
+    return (
+        f"[sidekick notice] `{model}` didn't read repository files: sidekick couldn't ask you to "
+        "allow it here. Allow it from an interactive session, or add the id to "
+        "openrouter.repo_access_models in ~/.config/sidekick/config.json.\n\n"
+    )
+
+
+def _incapable_ctx() -> Any:
+    """A request context whose client did not declare the elicitation capability."""
+    session = SimpleNamespace(check_client_capability=lambda caps: False)
+    return SimpleNamespace(request_context=SimpleNamespace(session=session), elicit=AsyncMock())
 
 
 def _tool_names(post: dict[str, Any]) -> set[str]:
@@ -349,7 +364,7 @@ async def test_accepted_model_without_consent_and_no_way_to_ask_gets_no_file_too
         tmp_path, [(200, reply())], accepted_models=[NEMO], catalog=_with_tools(NEMO)
     )
     answer = await _call(r, tmp_path, model=None)
-    assert answer == _declined_notice(NEMO) + "fine"
+    assert answer == _unasked_notice(NEMO) + "fine"
     post = fake.posts[0]
     assert "tools" not in post and "list_dir" not in post["messages"][0]["content"]
 
@@ -368,13 +383,47 @@ async def test_tool_capable_model_with_consent_gets_registry_once_asked(tmp_path
     assert "list_dir, glob, grep, and read_file" in sent[0]["messages"][0]["content"]
 
 
-async def test_first_use_question_carries_repository_access(tmp_path):
+async def test_first_use_asks_price_then_repository_access_separately(tmp_path):
     r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[], catalog=_with_tools(KIMI))
     elicit, asked = _asker("accept")
     answer = await _call(r, tmp_path, model=KIMI, elicit=elicit)
-    assert answer.endswith("fine") and "Repository access" not in answer
-    assert len(asked) == 1 and REPO_ACCESS_SENTENCE in asked[0]
+    assert answer.endswith("fine") and "repository access" not in answer
+    assert len(asked) == 2 and REPO_ACCESS_SENTENCE not in asked[0]
+    assert asked[0].startswith(f"Use `{KIMI}`") and asked[1].startswith(f"Let `{KIMI}` read")
     assert "list_dir" in _tool_names(fake.posts[-1])
+
+
+async def test_first_use_accept_then_repository_decline_runs_conversation_only(tmp_path):
+    r, fake, _ = _router(tmp_path, [(200, reply())], accepted_models=[], catalog=_with_tools(KIMI))
+    elicit, asked = _asker("accept", "decline")
+    answer = await _call(r, tmp_path, model=KIMI, elicit=elicit)
+    assert answer == _declined_notice(KIMI) + "fine" and len(asked) == 2
+    sent = _sent(fake)
+    assert len(sent) == 1 and "tools" not in sent[0]
+    assert "list_dir" not in sent[0]["messages"][0]["content"]
+
+
+async def test_unaccepted_paid_model_with_a_client_that_cannot_ask_sends_nothing(tmp_path):
+    """The real call path: the tools pass elicitor(ctx), which knows the client can't ask."""
+    r, fake, gen = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[], catalog=_with_tools(KIMI)
+    )
+    answer = await _call(r, tmp_path, model=KIMI, elicit=elicitor(_incapable_ctx()))
+    assert answer == unattended_paid_refused_message(KIMI)
+    assert fake.posts == []  # not even the billed privacy probe
+    gen.assert_not_awaited()
+    assert not _transcript_written(tmp_path)
+
+
+async def test_free_model_with_a_client_that_cannot_ask_runs_without_file_tools(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())] * 2, accepted_models=[], catalog=_with_tools(NEMO)
+    )
+    answer = await _call(r, tmp_path, model=NEMO, elicit=elicitor(_incapable_ctx()))
+    assert answer.endswith(_unasked_notice(NEMO) + "fine")
+    sent = _sent(fake)
+    assert len(sent) == 1 and "tools" not in sent[0]
+    assert sent[0]["provider"]["data_collection"] == "deny"
 
 
 async def test_declined_repository_access_sends_without_tools_and_says_so(tmp_path):
@@ -438,7 +487,8 @@ async def test_repointed_default_to_consenting_model_gets_tools(tmp_path):
 
     answer = await _call(r, tmp_path, elicit=elicit)
     assert NEMO in asked[0] and REPO_ACCESS_SENTENCE not in asked[0]
-    assert GEMMA in asked[1] and REPO_ACCESS_SENTENCE in asked[1]
+    assert asked[1].startswith(f"Use the free model `{GEMMA}`")
+    assert asked[2].startswith(f"Let `{GEMMA}` read files in this repository?")
     assert fake.posts[-1]["model"] == GEMMA and "list_dir" in _tool_names(fake.posts[-1])
     assert answer == "fine"
 

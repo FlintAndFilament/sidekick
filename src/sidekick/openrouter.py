@@ -341,14 +341,14 @@ class OpenRouterClient:
     async def preflight(
         self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
     ) -> Preflight:
-        """First-use price and privacy check for `model`, then (with `want_tools`) repository
-        consent. Fails closed when sidekick can't ask; 401/402 from the probe propagate.
+        """First-use price and privacy check for `model`, then (with `want_tools`) a separate
+        repository question. Fails closed when sidekick can't ask (`elicit` is None): nothing
+        is sent for a paid model, not even the billed probe. 401/402 from the probe propagate.
 
-        `tools` in the result is True only when the user has let `model` read repository files."""
+        `tools` in the result is True only when the user has let `model` read repository files;
+        `tools_reason` says why not when the call wanted them."""
         if model in self._accepted or model in self._notified:
-            if not want_tools:
-                return Preflight(True, tools=False)
-            return Preflight(True, tools=await self._repo_consent(model, elicit))
+            return await self._with_repo_consent(model, elicit, want_tools)
         if elicit is None and not is_free(model):  # even the probe is billed: send nothing (#141)
             return Preflight(False, message=unattended_paid_refused_message(model))
         status = await self.privacy_status(model)
@@ -359,18 +359,14 @@ class OpenRouterClient:
             )
         entry = self.entry(model)
         outcome = (
-            await elicit(
-                acceptance_question(model, entry, status, block=block, repo_access=want_tools)
-            )
+            await elicit(acceptance_question(model, entry, status, block=block, repo_access=False))
             if elicit
             else "unavailable"
         )
         if outcome == "accept":
             self._accepted.add(model)
             self._remember(remember_accepted_model, model, "accepted")
-            if want_tools:  # the question carried REPO_ACCESS_SENTENCE: one answer covers both
-                self._allow_repo(model)
-            return Preflight(True, tools=want_tools)
+            return await self._with_repo_consent(model, elicit, want_tools)
         if outcome == "decline":
             return Preflight(False, message=declined_message(model))
         if outcome == "cancel":
@@ -388,23 +384,32 @@ class OpenRouterClient:
                 model, entry, status, block=block, forced_deny=True, repo_access=False
             ),
             tools=False,
+            tools_reason="unasked" if want_tools else "",
         )
 
-    async def _repo_consent(self, model: str, elicit: Optional[Elicit]) -> bool:
-        """Whether an already-accepted `model` may read repository files, asking once if needed."""
+    async def _with_repo_consent(
+        self, model: str, elicit: Optional[Elicit], want_tools: bool
+    ) -> Preflight:
+        """Go ahead with an accepted (or notified) `model`; with `want_tools`, with file tools
+        only once the user has let it read repository files (its own question, asked once)."""
+        if not want_tools:
+            return Preflight(True, tools=False)
         if model in self._repo_access:
-            return True
-        if model in self._repo_declined or elicit is None:
-            return False
+            return Preflight(True, tools=True)
+        if model in self._repo_declined:
+            return Preflight(True, tools=False, tools_reason="declined")
+        if elicit is None:  # can't ask: no probe, no file tools
+            return Preflight(True, tools=False, tools_reason="unasked")
         status = await self.privacy_status(model)
         block = self._config.openrouter.block_data_collection
-        outcome = await elicit(repo_access_question(model, self.entry(model), status, block=block))
+        outcome = await elicit(repo_access_question(model, status, block=block))
         if outcome == "accept":
             self._allow_repo(model)
-            return True
+            return Preflight(True, tools=True)
         if outcome in ("decline", "cancel"):
             self._repo_declined.add(model)
-        return False
+            return Preflight(True, tools=False, tools_reason="declined")
+        return Preflight(True, tools=False, tools_reason="unasked")
 
     def _allow_repo(self, model: str) -> None:
         self._repo_access.add(model)

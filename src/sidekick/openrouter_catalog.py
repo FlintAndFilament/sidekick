@@ -361,13 +361,13 @@ def acceptance_question(
     return question + " " + REPO_ACCESS_SENTENCE if repo_access else question
 
 
-def repo_access_question(
-    model_id: str, entry: Optional[ORModel], status: PrivacyStatus, *, block: bool = False
-) -> str:
-    """The question asked the first time an already-accepted model would read repository files."""
+def repo_access_question(model_id: str, status: PrivacyStatus, *, block: bool = False) -> str:
+    """The question asked the first time an accepted model would read repository files.
+
+    The model's price was already accepted, so the subject is the plain model id."""
     return (
-        f"Let {subject_phrase(model_id, entry)} read files in this repository? Files it reads "
-        f"are sent to the provider serving it. {privacy_sentence(model_id, status, block=block)}"
+        f"Let `{model_id}` read files in this repository? Files it reads are sent to the "
+        f"provider serving it. {privacy_sentence(model_id, status, block=block)}"
     )
 
 

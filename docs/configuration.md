@@ -288,10 +288,12 @@ current free default from OpenRouter's catalog. `/sidekick:setup` writes it.
 
 OpenRouter models you have agreed to use. The first call on a model that is not listed asks one
 question showing its price and privacy status. Accepting it adds the id here, so the question is
-not asked again. Declining or cancelling sends nothing. When the client cannot ask (unattended),
-a paid model that is not listed here is refused before anything is sent, even the privacy check,
-since that check is billed; the message says how to accept it (`/sidekick:setup`, or add the id
-here). An unlisted free model is sent only if some of its providers do not collect data; then it
+not asked again. Declining or cancelling sends nothing. When the client cannot ask (unattended:
+it does not support MCP elicitation, which sidekick checks before sending anything), a paid model
+that is not listed here is refused before anything is sent, even the privacy check, since that
+check is billed; the message says how to accept it (`/sidekick:setup`, or add the id here). If a
+client that supports elicitation fails at the moment of asking, the privacy check has already
+run and the paid model is still refused. An unlisted free model is sent only if some of its providers do not collect data; then it
 goes out with deny routing, without file tools, and a notice. The full flow:
 [first-use-acceptance](diagrams/first-use-acceptance.mermaid). To accept a model ahead of time:
 `sidekick-setup openrouter --accept '<id>'`.
@@ -332,17 +334,16 @@ file tools off for Gemini) or pass a Gemini model with `model=`.
 OpenRouter models you have let read repository files. A model gets the file tools only after you
 say yes, per model, because each model's providers have their own privacy status:
 
-- **New model, file tools on:** its first-use question also says that files it reads are sent to
-  the provider serving it. One yes accepts the model and its repository access, and adds the id
-  both here and to `accepted_models`.
-- **Model already accepted:** the first call that would carry file tools asks "Let `<model>` read
-  files in this repository? Files it reads are sent to the provider serving it." with its privacy
-  status. Yes adds the id here. No or cancel runs that call without file tools, and the model is
-  not asked again until the server restarts.
+- **The question:** the first call that would carry file tools asks "Let `<model>` read files in
+  this repository? Files it reads are sent to the provider serving it." with its privacy status.
+  For a new model it comes right after the price and privacy question, as a separate question.
+  Yes adds the id here. No or cancel runs that call without file tools (conversation only), and
+  the model is not asked again until the server restarts.
 - **Nobody to ask (unattended):** the call runs without file tools.
 
-A call without file tools starts with a notice that repository access for the model was not
-accepted, so it saw only the prompt and the session's earlier turns. To grant access ahead of
+A call without file tools starts with a notice: after a no, that you declined repository access
+for the model, so it saw only the prompt and the session's earlier turns; unattended, that
+sidekick couldn't ask, with how to allow it. To grant access ahead of
 time, add the id here. If the config cannot be written, a yes lasts until the server restarts.
 
 ---

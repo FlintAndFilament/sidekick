@@ -185,9 +185,9 @@ def test_acceptance_question_mentions_repo_access():
 def test_repo_access_question_names_the_model_and_its_privacy():
     from sidekick.openrouter_catalog import repo_access_question
 
-    q = repo_access_question(NEMO, None, PrivacyStatus.ALL_MAY_COLLECT)
-    assert q == (
-        f"Let the free model `{NEMO}` read files in this repository? Files it reads are sent to "
+    q = repo_access_question(NEMO, PrivacyStatus.ALL_MAY_COLLECT)
+    assert q == (  # plain model id: the price was already accepted with the model
+        f"Let `{NEMO}` read files in this repository? Files it reads are sent to "
         "the provider serving it. Every provider serving it may store or train on your prompts, "
         "including any code sent with them."
     )

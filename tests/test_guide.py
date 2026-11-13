@@ -121,7 +121,7 @@ class TestOpenRouterSurface:
             workspace=_workspace(tmp_path), surface=Surface("openrouter", True, False, False, True)
         )
         assert len(text) <= INSTRUCTIONS_BUDGET
-        assert "OpenRouter models that support tools read this repository" in text
+        assert "OpenRouter models that support tools read this repository once you allow it" in text
         assert "conversation only" not in text
         assert "list_dir" not in text and "write_file" not in text
         assert "name paths" not in text and "Gemini reads" not in text

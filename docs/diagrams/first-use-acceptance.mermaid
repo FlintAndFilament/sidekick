@@ -1,13 +1,13 @@
 flowchart TD
     S["call on OpenRouter model M"] --> AC{"M accepted or<br/>already noticed?"}
     AC -->|yes| FT
-    AC -->|no| PAID{"sidekick can't ask<br/>and M is paid?"}
+    AC -->|no| PAID{"client can't be asked (no elicitation)<br/>and M is paid?"}
     PAID -->|yes| UP["'Not sent': accept it in /sidekick:setup<br/>or openrouter.accepted_models (no probe: it is billed)"]
     PAID -->|no| PR["probe: data_collection deny<br/>(cached per process)"]
     PR --> BL{"block_data_collection on<br/>and every provider may collect?"}
     BL -->|yes| BLK["'Blocked by your setting block_data_collection'<br/>nothing sent"]
-    BL -->|no| EL{"elicitation<br/>(adds the repository sentence<br/>when file tools would be sent)"}
-    EL -->|accept| SAVE["remember in openrouter.accepted_models<br/>(and repo_access_models if asked)"] --> SEND
+    BL -->|no| EL{"elicitation:<br/>price and privacy"}
+    EL -->|accept| SAVE["remember in openrouter.accepted_models"] --> FT
     EL -->|"decline / cancel"| NS["'Not sent', nothing sent"]
     EL -->|"unavailable + free + some providers don't collect"| NT["send with deny routing,<br/>no file tools, first-use notice"]
     EL -->|"unavailable + paid, or all may collect / unknown"| UR["'Not sent', accept once interactively"]
@@ -16,4 +16,5 @@ flowchart TD
     RA -->|yes| SENDT["send with file tools"]
     RA -->|"no: ask 'Let M read files in this repository?'"| RQ{"answer"}
     RQ -->|accept| RSAVE["remember in repo_access_models"] --> SENDT
-    RQ -->|"decline / cancel (not asked again this run),<br/>or can't ask"| SENDN["send without file tools,<br/>notice: repository access wasn't accepted"]
+    RQ -->|"decline / cancel (not asked again this run)"| SENDD["send without file tools,<br/>notice: you declined repository access"]
+    RQ -->|"can't ask"| SENDN["send without file tools,<br/>notice: sidekick couldn't ask"]

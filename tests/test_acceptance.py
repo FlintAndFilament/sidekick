@@ -84,9 +84,19 @@ async def test_unattended_paid_model_is_refused_and_nothing_is_sent(tmp_path):  
         "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models in "
         "~/.config/sidekick/config.json."
     )
-    assert len(fake.posts) <= 1  # at most the privacy probe; no chat request
-    assert all(p["max_tokens"] == 16 for p in fake.posts)
+    assert fake.posts == []  # not even the billed privacy probe
     assert not (await c.preflight(GROK, None)).proceed  # still refused next time
+    assert fake.posts == [] and not (tmp_path / "config.json").exists()
+
+
+async def test_paid_model_refused_when_the_question_is_unavailable(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply()), (200, reply())])
+    c = make_client(fake, tmp_path)
+    elicit, asked = _asker("unavailable")
+    pre = await c.preflight(GROK, elicit, want_tools=True)
+    assert pre == Preflight(proceed=False, message=unattended_paid_refused_message(GROK))
+    assert len(asked) == 1  # the question was tried, so the probe ran for its text
+    assert len(fake.posts) == 1 and fake.posts[0]["max_tokens"] == 16  # no chat request
     assert not (tmp_path / "config.json").exists()
 
 
@@ -221,7 +231,7 @@ async def test_persist_failure_keeps_acceptance_in_memory(tmp_path):
 async def test_preflight_auth_error_propagates(tmp_path):
     fake = FakeOpenRouter(replies=[(401, {"error": {"code": 401, "message": "x"}})])
     with pytest.raises(OpenRouterError):
-        await make_client(fake, tmp_path).preflight(GROK, None)
+        await make_client(fake, tmp_path).preflight(NEMO, None)  # free: the probe still runs
 
 
 def _ctx(result=None, *, capable=True, raises=None):

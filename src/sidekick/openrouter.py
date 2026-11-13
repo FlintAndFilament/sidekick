@@ -349,6 +349,8 @@ class OpenRouterClient:
             if not want_tools:
                 return Preflight(True, tools=False)
             return Preflight(True, tools=await self._repo_consent(model, elicit))
+        if elicit is None and not is_free(model):  # even the probe is billed: send nothing (#141)
+            return Preflight(False, message=unattended_paid_refused_message(model))
         status = await self.privacy_status(model)
         block = self._config.openrouter.block_data_collection
         if block and status is PrivacyStatus.ALL_MAY_COLLECT:

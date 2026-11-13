@@ -1,7 +1,7 @@
 # Roadmap
 
 What has shipped, what is open, and what is parked. Rebuilt from git history and GitHub issues on
-2026-11-11; everything under **Shipped** is on `main`.
+2026-11-13; everything under **Shipped** is on `main`.
 
 The `26.7.x` labels are the names the July releases went out under. Work after 26.7.4 is grouped
 by feature and issue number. From the plugin on, releases carry the plugin version
@@ -241,7 +241,7 @@ Also in `v0.5.0`:
 - `list_models` shows prices, privacy markers, search (`query=`) and a privacy check (`check=`).
   `/sidekick:setup` leads with OpenRouter.
 
-### OpenRouter repository access (#132) — unreleased
+### OpenRouter repository access (#132) — 0.7.0
 
 - OpenRouter models that support tool calling read the repository with the same sandboxed file
   tools Gemini uses: `list_dir`, `glob`, `grep`, `read_file`, and `write_file` on `brainstorm`,

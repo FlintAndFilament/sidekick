@@ -2,7 +2,7 @@
 <h4 align="center">A live second opinion for Claude Code from the model you choose: OpenRouter (Grok, Kimi, DeepSeek, Qwen and more) or Google Gemini, which also reads your repo and searches the web.</h4>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.0-blue.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0-blue.svg">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-blue.svg">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-1.28+-green.svg">
 </p>

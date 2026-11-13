@@ -26,6 +26,7 @@ def entry(
     efforts: tuple[str, ...] = ("high", "medium", "low"),
     mandatory: bool = False,
     reasoning: bool = True,
+    tools: bool = False,
 ) -> dict[str, Any]:
     return {
         "id": id,
@@ -34,7 +35,9 @@ def entry(
         "context_length": ctx,
         "architecture": {"input_modalities": list(inputs), "output_modalities": list(outputs)},
         "top_provider": {"max_completion_tokens": max_out},
-        "supported_parameters": ["max_tokens"] + (["reasoning"] if reasoning else []),
+        "supported_parameters": ["max_tokens"]
+        + (["reasoning"] if reasoning else [])
+        + (["tools"] if tools else []),
         "reasoning": {"mandatory": mandatory, "supported_efforts": list(efforts)}
         if reasoning
         else None,
@@ -124,6 +127,16 @@ def reply(text: str | None = "fine", finish: str = "stop") -> dict[str, Any]:
     }
 
 
+def tool_reply(*calls: tuple[str, str]) -> dict[str, Any]:
+    """A chat reply that asks for tool calls; each call is (name, raw JSON arguments)."""
+    tool_calls = [
+        {"id": f"call_{i}", "type": "function", "function": {"name": n, "arguments": a}}
+        for i, (n, a) in enumerate(calls)
+    ]
+    message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+    return {"choices": [{"message": message, "finish_reason": "tool_calls"}]}
+
+
 @dataclass
 class FakeOpenRouter:
     """A MockTransport handler: serves the catalog and replays scripted chat replies."""
@@ -165,10 +178,11 @@ def make_client(
     tmp_path: Path,
     *,
     clock: Callable[[], float] | None = None,
+    file_tools: dict[str, Any] | None = None,
     **openrouter: Any,
 ) -> OpenRouterClient:
     cfg = Config.model_validate(
-        {"openrouter": openrouter, "transcript_dir": str(tmp_path)},
+        {"openrouter": openrouter, "transcript_dir": str(tmp_path), "file_tools": file_tools or {}},
         context={"openrouter_key": True},
     )
     t = fake.transport()

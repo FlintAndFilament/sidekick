@@ -10,6 +10,7 @@ from sidekick.config import (
     load_config,
     openrouter_api_key,
     remember_accepted_model,
+    remember_repo_notice_shown,
 )
 from tests._fakes import FAKE_OPENROUTER_KEY
 
@@ -109,4 +110,31 @@ def test_remember_never_clobbers_an_unreadable_file(tmp_path):
     path.write_text("{not json")
     with pytest.raises(ConfigError):
         remember_accepted_model("x-ai/grok-4.7", path)
+    assert path.read_text() == "{not json"
+
+
+def test_remember_repo_notice_shown_sets_flag_and_keeps_other_keys(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "project": "p",
+                "openrouter": {"accepted_models": ["x-ai/grok-4.7"]},
+            }
+        )
+    )
+    remember_repo_notice_shown(path)
+    assert json.loads(path.read_text()) == {
+        "project": "p",
+        "openrouter": {"accepted_models": ["x-ai/grok-4.7"], "repo_access_notice_shown": True},
+    }
+    assert OpenRouterConfig().repo_access_notice_shown is False
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]
+
+
+def test_remember_repo_notice_shown_refuses_unparseable_file(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text("{not json")
+    with pytest.raises(ConfigError):
+        remember_repo_notice_shown(path)
     assert path.read_text() == "{not json"

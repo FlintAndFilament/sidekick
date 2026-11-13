@@ -1,4 +1,18 @@
 flowchart TD
+    START["call_gemini(): registry only if file tools on<br/>and backend.tools_supported(model)"] --> BK{backend?}
+    BK -->|Gemini| A
+    BK -->|"OpenRouter, model lists tools"| OA["OpenRouterClient.ask(): body + tools (OpenAI format)<br/>+ provider.require_parameters: true"]
+    BK -->|"OpenRouter, no tools / catalog unknown"| NT["one plain request, no tools;<br/>reply prefixed: model can't read repository files"]
+    OA --> ORND["round n of 20: POST /chat/completions<br/>(429/502/503 retried per round)"]
+    ORND -->|"404 Filter by Data Policy"| OE["[sidekick] Not sent: no provider that<br/>supports tool calling (and doesn't collect data)"]
+    ORND --> OTC{message.tool_calls?}
+    OTC -->|no| ANS
+    OTC -->|yes| OD["echo assistant turn; parse arguments JSON<br/>(not an object → {error: arguments were not valid JSON});<br/>registry.dispatch() each call in order"]
+    OD --> OREC["append ToolCallRecord per call,<br/>one role=tool message per call"]
+    OREC --> OCAP{20 rounds used?}
+    OCAP -->|no| ORND
+    OCAP -->|yes| OF["'Tool budget exhausted — answer now'<br/>tools kept, tool_choice: none"]
+    OF --> ANS
     A["client.ask(): history + prompt,<br/>registry (file tools, maybe empty)"] --> CFG["build_config(): file-tool declarations;<br/>web on → + google_search + url_context<br/>+ include_server_side_tool_invocations<br/>(Developer API only; dropped on Vertex)"]
     CFG --> R["round n of 20: generate_content<br/>(503/429 retried with backoff)"]
     R --> NC{no candidates?}
@@ -24,5 +38,5 @@ flowchart TD
     E3 --> FB
     FB{"call_gemini() catches ClientError:<br/>503/429 and not already on fallback?"}
     FB -->|"yes, but write_file already succeeded"| ERR["[sidekick error] … not retried:<br/>files were already written"]
-    FB -->|yes, no writes| RETRY[rerun whole loop once on newest Flash-Lite]
+    FB -->|yes, no writes| RETRY["rerun whole loop once on the fallback:<br/>Gemini newest Flash-Lite; OpenRouter next free model<br/>(paid OpenRouter models never switch)"]
     FB -->|no| ERR2["[sidekick error] …"]

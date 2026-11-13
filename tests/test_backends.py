@@ -60,3 +60,7 @@ def test_session_hit_refreshes_used_at():
 def test_model_hint_is_todays_schema_hint():
     c = _gemini()
     assert c.model_hint().startswith("Optional Gemini model.")
+
+
+def test_gemini_tools_supported_true():
+    assert _gemini().tools_supported("gemini-3.5-flash") is True

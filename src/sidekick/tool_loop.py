@@ -22,7 +22,8 @@ Design notes:
 Raises:
   ClientError — empty answer, or repeated MALFORMED_FUNCTION_CALL
 
-Used by:  file_tools.py (registry source), client.py (loop), tools/base.py (records)
+Used by:  file_tools.py (registry source), client.py (loop), tools/base.py (records),
+          openai_tool_loop.py (registry, records, constants)
 Imports:  errors.py (ClientError), google-genai types
 """
 
@@ -110,6 +111,20 @@ class ToolRegistry:
     @property
     def declarations(self) -> list[types.FunctionDeclaration]:
         return [decl for decl, _ in self._tools.values()]
+
+    def openai_tools(self) -> list[dict[str, Any]]:
+        """The same tools in OpenAI chat-completions `tools` format, for openai_tool_loop.py."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": decl.name,
+                    "description": decl.description,
+                    "parameters": decl.parameters_json_schema,
+                },
+            }
+            for decl in self.declarations
+        ]
 
     def __len__(self) -> int:
         return len(self._tools)

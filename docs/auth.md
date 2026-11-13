@@ -21,7 +21,8 @@ path **O**: it shows live prices, runs a privacy check and offers a free model.
   set, the server serves OpenRouter only and logs a warning. See
   [backend-routing](diagrams/backend-routing.mermaid).
 
-OpenRouter models are conversation only: they cannot read your repository or search the web.
+OpenRouter models cannot search the web. Those that support tool calling read your repository
+like Gemini does; see [Repository access](tools.md#repository-access).
 Prices, the first-use question and privacy settings: [configuration.md](configuration.md#openrouteraccepted_models).
 
 The rest of this page covers the Gemini backends.

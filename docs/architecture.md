@@ -26,10 +26,11 @@ Package root: `src/sidekick/`.
 | `models.py` | Model taxonomy: per-backend shortlist, backend detection, schema hint, chat-capable filter, newest-per-family resolution, alias mapping. Pure, no I/O | none |
 | `backends.py` | Pure types shared by every backend: `Session`, the `Backend` and `ModelSource` protocols, `Surface`, `Preflight`, `Elicit`. No SDK imports | config, errors |
 | `router.py` | `Router`: the `ModelSource` the tools see when an OpenRouter key is set. Routes each call to OpenRouter or Gemini, merges sessions, reports the `Surface` (see [backend-routing](diagrams/backend-routing.mermaid)) | backends, client, openrouter |
-| `openrouter.py` | `OpenRouterClient`: chat over OpenRouter's HTTP API, retries, the first-use price and privacy preflight ([first-use-acceptance](diagrams/first-use-acceptance.mermaid)), free-model fallback | config, backends, client, openrouter_catalog |
+| `openrouter.py` | `OpenRouterClient`: chat over OpenRouter's HTTP API, retries, the first-use price and privacy preflight ([first-use-acceptance](diagrams/first-use-acceptance.mermaid)), free-model fallback (tool-capable models first), `tools_supported(model)`, and, for tool-capable models, file tools with `provider.require_parameters` plus the one-time repository notice | config, backends, client, openrouter_catalog, openai_tool_loop |
+| `openai_tool_loop.py` | `run_openai_tool_loop()`: the OpenAI-format function-calling loop for OpenRouter (`tool_calls` → `tool` messages), over the shared `ToolRegistry`; dispatch, records, round cap and budget prompt come from `tool_loop.py`. HTTP-free: the caller supplies `post` | tool_loop |
 | `openrouter_catalog.py` | OpenRouter's public model catalog: prices, privacy status, free candidates, search, `FREE_LIMITS`, and the user-facing messages. The key is never sent here | none |
 | `client.py` | `GeminiClient`: builds the google-genai client, LRU session cache (50) and `sessions()` for `list_sessions`, model resolution, thinking translation that learns per-model rejections, 503/429 retry with backoff, `build_config()`, `ask()` | config, errors, models, tool_loop, web_tools |
-| `tool_loop.py` | `ToolRegistry`, `ToolCallRecord`, `run_tool_loop()` (up to 20 rounds, then a forced answer), `record_grounding()` for server-side web activity | errors |
+| `tool_loop.py` | `ToolRegistry` (declarations for Gemini, or as OpenAI-format `openai_tools()`), `ToolCallRecord`, `run_tool_loop()` for Gemini (up to 20 rounds, then a forced answer), `record_grounding()` for server-side web activity | errors |
 | `sandbox.py` | Path confinement: resolves every model-supplied path inside the root, applies the deny-list at any depth, walks without leaving the root | none |
 | `file_tools.py` | `list_dir`, `glob`, `grep`, `read_file`, `write_file` on top of `Sandbox`, with result and size caps; publishes them to a `ToolRegistry` (read-only or read+write) | sandbox, tool_loop |
 | `artifacts.py` | `ArtifactStore`: saves a final answer as `<YYYYMMDD-HHMM>-<tool>-<slug>.md`, never overwriting | none |
@@ -106,7 +107,9 @@ Plugin options arrive as env (`SIDEKICK_API_KEY`, `SIDEKICK_SA_FILE`, set in `pl
    A thinking-level rejection is learned and the request rebuilt.
 7. In the loop, `record_grounding()` records server-side searches, URL fetches and their
    sources. Gemini's file-tool calls are dispatched locally through the sandbox and recorded.
-   The loop ends when Gemini answers in text.
+   The loop ends when Gemini answers in text. On OpenRouter, `OpenRouterClient.ask()` runs
+   `run_openai_tool_loop()` instead, for models whose catalog entry lists tool calling: the same
+   registry dispatch, records and round cap, in the OpenAI chat-completions format (#132).
 8. On success only, the prompt and final answer are committed to the session history.
 9. If the call failed with a terminal 503/429 and the model was not already the fallback,
    `call_gemini()` retries once on the newest Flash-Lite and prefixes a disclosure notice.

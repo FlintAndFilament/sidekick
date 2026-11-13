@@ -46,7 +46,7 @@ from sidekick.config import ThinkingLevel
 from sidekick.file_tools import READ_TOOL_NAMES, WRITE_TOOL_NAME
 from sidekick.sandbox import DEFAULT_DENY, Sandbox
 from sidekick.sources import record_uris, resolve_redirects, sources_footer
-from sidekick.tool_loop import ToolCallRecord
+from sidekick.tool_loop import ToolCallRecord, ToolRegistry
 from sidekick.transcript import TranscriptWriter
 from sidekick.web_tools import WEB_TOOL_NAMES, Capabilities, resolve_capabilities
 from sidekick.workspace import Workspace
@@ -161,8 +161,10 @@ _ARTIFACT_CLAUSE: dict[ArtifactMode, str] = {
 
 
 _OPENROUTER_WEB = (
-    "\n\nWeb access: none for OpenRouter models; web=true is ignored and the reply says so."
+    "\n\nWeb access: none — OpenRouter models don't offer web search; web=true is ignored and "
+    "the reply says so."
 )
+_OPENROUTER_PRIVACY = " Files the model reads are sent to the OpenRouter provider serving it."
 
 
 def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str:
@@ -194,19 +196,50 @@ def _web_note(default: bool, write_capable: bool, supported: bool = True) -> str
     return note
 
 
+def _read_row(subject: str, workspace: Workspace) -> str:
+    """The repository-read sentence, shared by Gemini and tool-capable OpenRouter models."""
+    return (
+        f"\n\nRepository access: {subject} reads this repository itself with "
+        f"{', '.join(READ_TOOL_NAMES)}, "
+        f"sandboxed to {workspace.sandbox.root} — {deny_note(workspace.sandbox)}, and "
+        f"{_SEARCH_NOTE}. Name the paths it should look at rather than pasting file contents "
+        "into this call."
+    )
+
+
+def _write_note(subject: str, workspace: Workspace, write: bool) -> str:
+    if write:
+        return (
+            f" This call MAY MODIFY the working tree: {subject} can create or overwrite files "
+            f"anywhere under the root with {WRITE_TOOL_NAME} (up to {workspace.max_write_bytes} "
+            "bytes "
+            "each). It cannot delete, rename, or execute anything."
+        )
+    return f" {subject} itself cannot modify the working tree."
+
+
 def _openrouter_hint(
     workspace: Optional[Workspace],
     write: bool,
     artifacts: ArtifactMode,
     gemini_available: bool,
     disk: str,
+    files: bool = False,
 ) -> str:
-    """The capability row when the default model runs on OpenRouter: conversation only."""
-    hint = (
-        "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
-        "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
-        "nothing else. Include the code or context you want considered directly in this call."
-    )
+    """The capability row when the default model runs on OpenRouter.
+
+    With `files` (the default model accepts tool definitions and a workspace is wired) it reads
+    the repository like Gemini does; otherwise it is conversation only.
+    """
+    if files and workspace is not None and workspace.tools_enabled:
+        hint = _read_row("the model", workspace) + _OPENROUTER_PRIVACY
+        disk += _write_note("The model", workspace, write)
+    else:
+        hint = (
+            "\n\nRepository access: none for the default model. It runs on OpenRouter, which in "
+            "sidekick is conversation only: it sees this prompt and the session's earlier turns, "
+            "nothing else. Include the code or context you want considered directly in this call."
+        )
     if gemini_available and workspace is not None and workspace.tools_enabled:
         hint += (
             " Passing model=flash, flash-lite, pro or a gemini-* id runs the call on Gemini "
@@ -227,6 +260,7 @@ def capability_hint(
     web_supported: bool = True,
     default_backend: Literal["gemini", "openrouter"] = "gemini",
     gemini_available: bool = False,
+    files: bool = False,
 ) -> str:
     """Client-facing sentence describing what this tool can read and what it writes (#74).
 
@@ -239,7 +273,7 @@ def capability_hint(
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
     if default_backend == "openrouter":
-        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk)
+        return _openrouter_hint(workspace, write, artifacts, gemini_available, disk, files)
     # Only claim write_file is withheld where it would otherwise have been offered:
     # with file tools off, it does not exist and mentioning it would mislead.
     web_note = _web_note(
@@ -256,22 +290,8 @@ def capability_hint(
             f"Gemini itself cannot write anything.{web_note}"
         )
 
-    hint = (
-        f"\n\nRepository access: Gemini reads this repository itself with "
-        f"{', '.join(READ_TOOL_NAMES)}, "
-        f"sandboxed to {workspace.sandbox.root} — {deny_note(workspace.sandbox)}, and "
-        f"{_SEARCH_NOTE}. Name the paths it should look at rather than pasting file contents "
-        "into this call."
-    )
-    if write:
-        disk += (
-            " This call MAY MODIFY the working tree: Gemini can create or overwrite files "
-            f"anywhere under the root with {WRITE_TOOL_NAME} (up to {workspace.max_write_bytes} "
-            "bytes "
-            "each). It cannot delete, rename, or execute anything."
-        )
-    else:
-        disk += " Gemini itself cannot modify the working tree."
+    hint = _read_row("Gemini", workspace)
+    disk += _write_note("Gemini", workspace, write)
     return hint + disk + _ARTIFACT_CLAUSE[artifacts] + web_note
 
 
@@ -375,13 +395,14 @@ async def call_gemini(
 ) -> ToolResult:
     """Pick the backend, get a session, call ask(), log to transcript, return the reply.
 
-    `client.backend_for(model)` picks the backend (Gemini or OpenRouter). With a workspace and a
-    backend that supports files, the model gets the read file tools (plus write_file when
-    `write`) unless the file_tools kill switch is off; OpenRouter models are conversation only,
-    and a per-call OpenRouter model is told apart by a notice. Every tool call is recorded in
-    the transcript — including calls made before a failure. With `artifact_topic` (and a
-    workspace), the final answer is saved as an artifact and its path appended to the reply; a
-    failed save adds a notice but never loses the answer.
+    `client.backend_for(model)` picks the backend (Gemini or OpenRouter). With a workspace, a
+    backend that supports files and a model that accepts tools (`tools_supported`, decided for
+    the model preflight settled on, and again for a fallback), the model gets the read file
+    tools (plus write_file when `write`) unless the file_tools kill switch is off. A model that
+    can't use tools answers from the conversation alone, with a notice. Every tool call is
+    recorded in the transcript — including calls made before a failure. With `artifact_topic`
+    (and a workspace), the final answer is saved as an artifact and its path appended to the
+    reply; a failed save adds a notice but never loses the answer.
 
     `web` attaches Gemini's server-side search and URL fetch (#76). None follows the chosen
     backend's default. Web access and write_file are mutually exclusive within a call:
@@ -419,30 +440,41 @@ async def call_gemini(
         # the call, and restore write — the exclusion only existed because web was in play.
         _log.warning("web access requested but unsupported on %s", backend.label)
         caps = Capabilities(web=False, write=write)
-    registry = (
-        workspace.registry(write=caps.write) if workspace and backend.supports_files else None
-    )
     saving = workspace is not None and artifact_topic is not None
-    if registry:
-        system_instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
-        if caps.write and saving:
-            system_instruction += _ARTIFACT_PREAMBLE
-    if caps.web:
-        system_instruction += _WEB_PREAMBLE
+
+    def _tooling_for(use_model: str) -> tuple[Optional[ToolRegistry], str]:
+        """The file tools `use_model` gets, and the system instruction that describes them.
+
+        Decided per model actually sent to (after preflight, and again for a fallback): on
+        OpenRouter only some models accept tool definitions."""
+        registry = (
+            workspace.registry(write=caps.write)
+            if workspace and backend.supports_files and backend.tools_supported(use_model)
+            else None
+        )
+        instruction = system_instruction
+        if registry:
+            instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
+            if caps.write and saving:
+                instruction += _ARTIFACT_PREAMBLE
+        if caps.web:
+            instruction += _WEB_PREAMBLE
+        return registry, instruction
+
+    def _files_notice(use_model: str) -> str:
+        if workspace is None or not workspace.tools_enabled or backend.tools_supported(use_model):
+            return ""
+        return (
+            f"[sidekick notice] `{use_model}` can't use tools, so it could not read repository "
+            "files: it saw only this prompt and the session's earlier turns. Paste the code, or "
+            "pick a tool-capable model (list_models).\n\n"
+        )
+
     records: list[ToolCallRecord] = []
 
     session = backend.get_or_create_session(name=f"{tool_name}:{session_name}", model=model)
     requested_model = backend.resolve_model(model)
     fallback_model = backend.fallback_for(requested_model)
-    files_notice = (
-        f"[sidekick notice] `{requested_model}` runs on OpenRouter and could not read "
-        "repository files: it saw only this prompt and the session's earlier turns.\n\n"
-        if model is not None
-        and workspace is not None
-        and workspace.tools_enabled
-        and not backend.supports_files
-        else ""
-    )
 
     try:
         refusal, checked, notices = await _preflight_until_stable(
@@ -473,11 +505,12 @@ async def call_gemini(
         # Turns the stand-in starts with; anything past this index is this call's new turn,
         # even if a concurrent call on the same session commits while the fallback runs.
         base = len(target.history)
+        registry, instruction = _tooling_for(target.model)
         answer = await backend.ask(
             target,
             prompt,
             thinking,
-            system_instruction=system_instruction,
+            system_instruction=instruction,
             registry=registry,
             records=records,
             web=caps.web,
@@ -596,4 +629,17 @@ async def call_gemini(
         if web_refused
         else ""
     )
-    return (fallback_notice or "") + "".join(notices) + files_notice + web_notice + response
+    files_notice = _files_notice(answered_by)
+    repo_notice = (
+        backend.take_repo_notice()
+        if any(r.name in (*READ_TOOL_NAMES, WRITE_TOOL_NAME) for r in records)
+        else ""
+    )
+    return (
+        (fallback_notice or "")
+        + "".join(notices)
+        + repo_notice
+        + files_notice
+        + web_notice
+        + response
+    )

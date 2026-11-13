@@ -84,6 +84,7 @@ def register(
             web_supported=client.web_supported,
             default_backend=client.surface.primary,
             gemini_available=client.surface.gemini_available,
+            files=client.surface.files,
         ),
         annotations=tool_annotations(workspace, write=_WRITE),
     )

@@ -340,13 +340,25 @@ def subject_phrase(model_id: str, entry: Optional[ORModel]) -> str:
     return f"`{model_id}` (price not shown in OpenRouter's catalog: see {model_page(model_id)})"
 
 
+REPO_ACCESS_SENTENCE = (
+    "With repository access on, the files it reads are sent to the provider serving it."
+)
+
+
 def acceptance_question(
-    model_id: str, entry: Optional[ORModel], status: PrivacyStatus, *, block: bool
+    model_id: str,
+    entry: Optional[ORModel],
+    status: PrivacyStatus,
+    *,
+    block: bool,
+    repo_access: bool = True,
 ) -> str:
     question = (
         f"Use {subject_phrase(model_id, entry)}? {privacy_sentence(model_id, status, block=block)}"
     )
-    return question + " " + FREE_LIMITS if is_free(model_id) else question
+    if is_free(model_id):
+        question += " " + FREE_LIMITS
+    return question + " " + REPO_ACCESS_SENTENCE if repo_access else question
 
 
 def first_use_notice(
@@ -356,6 +368,7 @@ def first_use_notice(
     *,
     block: bool,
     forced_deny: bool = False,
+    repo_access: bool = True,
 ) -> str:
     if forced_deny and status is PrivacyStatus.SOME_MAY_COLLECT:
         privacy = "Some providers serving it may store or train on your prompts."
@@ -367,9 +380,10 @@ def first_use_notice(
         if forced_deny
         else ""
     )
+    repo = " " + REPO_ACCESS_SENTENCE if repo_access else ""
     return (
         f"[sidekick notice] First use of {subject_phrase(model_id, entry)}. "
-        f"{privacy}{limits}{forced} Shown once; accept it in /sidekick:setup to skip this.\n\n"
+        f"{privacy}{limits}{forced}{repo} Shown once; accept it in /sidekick:setup to skip this.\n\n"
     )
 
 

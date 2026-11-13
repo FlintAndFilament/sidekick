@@ -42,6 +42,7 @@ from sidekick.config import (
     ConfigError,
     ThinkingLevel,
     remember_accepted_model,
+    remember_repo_notice_shown,
 )
 from sidekick.errors import ClientError
 from sidekick.openai_tool_loop import run_openai_tool_loop
@@ -79,6 +80,11 @@ ATTRIBUTION_HEADERS = {
 FREE_MAX_RETRIES = 1
 FREE_COOLDOWN_SECONDS = 600.0
 PROBE_MAX_TOKENS = 16
+_REPO_NOTICE = (
+    "[sidekick notice] This reply read repository files through OpenRouter: files the model "
+    "reads are sent to the provider serving it, subject to that provider's privacy status "
+    "(list_models check=<id>). Shown once.\n\n"
+)
 _DENY = {"data_collection": "deny"}
 _RETRY_STATUSES = frozenset({429, 502, 503})
 _REQUIRE_PARAMETERS = "require_parameters"
@@ -206,6 +212,7 @@ class OpenRouterClient:
         self._deny_models: set[str] = set()
         self._accepted: set[str] = set(config.openrouter.accepted_models)
         self._notified: set[str] = set()
+        self._repo_notice_shown = False
         self._gated: set[str] = set()
         self._cooling: dict[str, float] = {}
 
@@ -344,8 +351,11 @@ class OpenRouterClient:
                 False, message=f"[sidekick] {blocked_message(model)} Nothing was sent."
             )
         entry = self.entry(model)
+        repo_access = self._config.file_tools.enabled
         outcome = (
-            await elicit(acceptance_question(model, entry, status, block=block))
+            await elicit(
+                acceptance_question(model, entry, status, block=block, repo_access=repo_access)
+            )
             if elicit
             else "unavailable"
         )
@@ -369,8 +379,27 @@ class OpenRouterClient:
         self._notified.add(model)
         self._deny_models.add(model)  # unattended: privacy-only routing for this model
         return Preflight(
-            True, notice=first_use_notice(model, entry, status, block=block, forced_deny=True)
+            True,
+            notice=first_use_notice(
+                model,
+                entry,
+                status,
+                block=block,
+                forced_deny=True,
+                repo_access=repo_access,
+            ),
         )
+
+    def take_repo_notice(self) -> str:
+        """The one-time 'files go to the provider' notice, or '' once it has been shown."""
+        if self._repo_notice_shown or self._config.openrouter.repo_access_notice_shown:
+            return ""
+        self._repo_notice_shown = True
+        try:
+            remember_repo_notice_shown(self._config_path)
+        except (ConfigError, OSError) as exc:
+            _log.warning("repository notice shown but not remembered (%s)", type(exc).__name__)
+        return _REPO_NOTICE
 
     def resolve_model(self, model: Optional[str]) -> str:
         if model is None:

@@ -106,6 +106,8 @@ class Backend(Protocol):
 
     async def preflight(self, model: str, elicit: Optional[Elicit]) -> Preflight: ...
 
+    def take_repo_notice(self) -> str: ...
+
     async def ask(
         self,
         session: Session,

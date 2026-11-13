@@ -610,4 +610,16 @@ async def call_gemini(
         else ""
     )
     files_notice = _files_notice(answered_by)
-    return (fallback_notice or "") + "".join(notices) + files_notice + web_notice + response
+    repo_notice = (
+        backend.take_repo_notice()
+        if any(r.name in (*READ_TOOL_NAMES, WRITE_TOOL_NAME) for r in records)
+        else ""
+    )
+    return (
+        (fallback_notice or "")
+        + "".join(notices)
+        + repo_notice
+        + files_notice
+        + web_notice
+        + response
+    )

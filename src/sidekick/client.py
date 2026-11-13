@@ -279,6 +279,10 @@ class GeminiClient:
             return Preflight(True, notice=GEMINI_UNPAID_NOTICE)
         return Preflight(True)
 
+    def take_repo_notice(self) -> str:
+        """Gemini reads files by design; there is nothing extra to disclose."""
+        return ""
+
     @property
     def surface(self) -> Surface:
         return Surface("gemini", True, self.web_supported, self.web_default, True)

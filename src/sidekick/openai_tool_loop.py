@@ -15,8 +15,10 @@ Design notes:
     budget prompt all come from tool_loop.py, so a call behaves the same on either backend
   - A turn with non-empty tool_calls is a tool turn even if it also carries text; the
     assistant message is echoed back verbatim so the provider sees its own turn
-  - Arguments arrive as a JSON string; one that does not parse to an object becomes an
-    {"error": ...} result returned to the model, so it can correct itself
+  - Arguments arrive as a JSON string; an empty one means no arguments ({}), and one that
+    does not parse to an object becomes an {"error": ...} result returned to the model
+  - A call without an id gets a stable synthesized one ("call_<round>_<index>"), used in
+    both the echoed assistant turn and the matching `tool` message
   - Records are appended as each call executes, so callers keep them if a later round fails
   - Logs carry counts only, never arguments or results
 
@@ -51,7 +53,11 @@ _BAD_ARGUMENTS = "arguments were not valid JSON"
 
 
 def _parse_arguments(raw: Any) -> Optional[dict[str, Any]]:
-    """The call's JSON-string arguments as a dict, or None when they are not a JSON object."""
+    """The call's JSON-string arguments as a dict, or None when they are not a JSON object.
+
+    An empty or whitespace-only string is a no-argument call ({})."""
+    if isinstance(raw, str) and not raw.strip():
+        return {}
     try:
         args = json.loads(raw)
     except (TypeError, ValueError):
@@ -78,13 +84,17 @@ async def run_openai_tool_loop(
     final_text is None when the answer is empty. Appends every executed call to `records` as
     it happens. `messages` is not mutated."""
     history = list(messages)
-    for _ in range(max_rounds):
+    for round_no in range(max_rounds):
         turn = await post(history, True)
         message = turn.get("message") or {}
-        calls = message.get("tool_calls") or []
-        if not calls:
+        raw_calls = message.get("tool_calls") or []
+        if not raw_calls:
             return _final(turn)
-        history.append(message)
+        calls = [
+            {**call, "id": call.get("id") or f"call_{round_no}_{index}"}
+            for index, call in enumerate(raw_calls)
+        ]
+        history.append({**message, "tool_calls": calls})
         for call in calls:
             function = call.get("function") or {}
             name = function.get("name") or ""
@@ -100,7 +110,7 @@ async def run_openai_tool_loop(
             history.append(
                 {
                     "role": "tool",
-                    "tool_call_id": call.get("id"),
+                    "tool_call_id": call["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 }
             )

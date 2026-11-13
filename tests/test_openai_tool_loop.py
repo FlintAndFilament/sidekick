@@ -184,3 +184,25 @@ async def test_input_messages_not_mutated(registry: ToolRegistry) -> None:
     post = FakePost(_calls(("read_file", '{"path": "a.txt"}')), _answer("done"))
     await run_openai_tool_loop(post, messages, registry, [])
     assert messages == snapshot
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+async def test_empty_arguments_are_a_no_arg_call(registry: ToolRegistry, raw: str) -> None:
+    post = FakePost(_calls(("list_dir", raw)), _answer("listed"))
+    records: list[ToolCallRecord] = []
+    result = await run_openai_tool_loop(post, _prompt(), registry, records)
+    assert result == ("listed", "stop")
+    assert records[0].ok and records[0].args == {}
+    assert "a.txt" in post.requests[1][0][-1]["content"]
+
+
+async def test_missing_call_id_is_synthesized_consistently(registry: ToolRegistry) -> None:
+    turn = _calls(("read_file", '{"path": "a.txt"}'), ("read_file", '{"path": "b.txt"}'))
+    for call in turn["message"]["tool_calls"]:
+        del call["id"]
+    post = FakePost(turn, _answer("ok"))
+    await run_openai_tool_loop(post, _prompt(), registry, [])
+    second = post.requests[1][0]
+    echoed_ids = [c["id"] for c in second[2]["tool_calls"]]
+    tool_ids = [m["tool_call_id"] for m in second if m["role"] == "tool"]
+    assert echoed_ids == tool_ids == ["call_0_0", "call_0_1"]

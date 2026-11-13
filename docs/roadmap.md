@@ -228,7 +228,7 @@ Also in `v0.5.0`:
   work exactly as before without the key. Model ids shaped `author/model` go to OpenRouter;
   Gemini ids and the `flash` / `flash-lite` / `pro` aliases go to Gemini.
 - OpenRouter models are conversation only: they see the prompt Claude sends, not your files or
-  the web (tool use is #132).
+  the web (tool use came in #132, below).
 - Prices come live from OpenRouter's catalog. The first use of a model asks once, showing its
   price and whether its providers may store or train on prompts; accepted models are remembered.
 - Privacy: allowed by default with a clear warning. `openrouter.block_data_collection: true`

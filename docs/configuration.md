@@ -289,8 +289,10 @@ current free default from OpenRouter's catalog. `/sidekick:setup` writes it.
 OpenRouter models you have agreed to use. The first call on a model that is not listed asks one
 question showing its price and privacy status. Accepting it adds the id here, so the question is
 not asked again. Declining or cancelling sends nothing. When the client cannot ask (unattended),
-the call is not sent unless some providers for the model do not collect data; then it goes out
-with deny routing and a one-time notice. The full flow:
+a paid model that is not listed here is refused before anything is sent, even the privacy check,
+since that check is billed; the message says how to accept it (`/sidekick:setup`, or add the id
+here). An unlisted free model is sent only if some of its providers do not collect data; then it
+goes out with deny routing, without file tools, and a notice. The full flow:
 [first-use-acceptance](diagrams/first-use-acceptance.mermaid). To accept a model ahead of time:
 `sidekick-setup openrouter --accept '<id>'`.
 
@@ -322,17 +324,38 @@ file tools off for Gemini) or pass a Gemini model with `model=`.
 
 ---
 
+### `openrouter.repo_access_models`
+
+**Type:** list of strings
+**Default:** `[]`
+
+OpenRouter models you have let read repository files. A model gets the file tools only after you
+say yes, per model, because each model's providers have their own privacy status:
+
+- **New model, file tools on:** its first-use question also says that files it reads are sent to
+  the provider serving it. One yes accepts the model and its repository access, and adds the id
+  both here and to `accepted_models`.
+- **Model already accepted:** the first call that would carry file tools asks "Let `<model>` read
+  files in this repository? Files it reads are sent to the provider serving it." with its privacy
+  status. Yes adds the id here. No or cancel runs that call without file tools, and the model is
+  not asked again until the server restarts.
+- **Nobody to ask (unattended):** the call runs without file tools.
+
+A call without file tools starts with a notice that repository access for the model was not
+accepted, so it saw only the prompt and the session's earlier turns. To grant access ahead of
+time, add the id here. If the config cannot be written, a yes lasts until the server restarts.
+
+---
+
 ### `openrouter.repo_access_notice_shown`
 
 **Type:** boolean
 **Default:** `false`
 
-Set to `true` by sidekick after it shows the one-time notice that files an OpenRouter model reads
-are sent to the provider serving it. The notice is prepended to the first OpenRouter reply that
-actually used file tools; models accepted before repository access existed (including the 0.6.0
-default) see it there, and new models see the same sentence in their first-use question. Set it
-back to `false` to see the notice again. If the config cannot be written, the notice is shown
-once per server run.
+**Deprecated and ignored.** It once recorded a one-time text notice about repository access. That
+notice is gone: repository access is now a question per model (see
+[`openrouter.repo_access_models`](#openrouterrepo_access_models)). The field still loads so older
+config files keep working, but setting it changes nothing and nobody counts as having agreed.
 
 ---
 

@@ -9,13 +9,17 @@ Responsibilities:
   - Send chat completions over httpx and turn every failure into a ClientError
 
 Design notes:
-  - Conversation only: no file tools, no web, no write_file (ask() ignores registry/records/web)
+  - File tools on tool-capable models: with a registry and tools_supported(model), ask() sends
+    `tools` plus provider.require_parameters and runs openai_tool_loop.py; otherwise it is a
+    single conversation-only request. No web for any OpenRouter model (`web` is ignored)
+  - With file tools on, the free default and free fallback prefer tool-capable models
   - Retries cover 429/502/503 and transport errors; free models retry once, paid ones more
   - Logs carry type names and statuses only, never headers, bodies or the key
   - _post and OpenRouterError are the shared seam for the privacy probe and free rotation
 
 Used by:  __main__.py / tools (via the Backend protocol)
-Imports:  config.py, backends.py, client.py (retry and session constants), openrouter_catalog.py
+Imports:  config.py, backends.py, client.py (retry and session constants), openrouter_catalog.py,
+          openai_tool_loop.py
 """
 
 import asyncio
@@ -40,6 +44,7 @@ from sidekick.config import (
     remember_accepted_model,
 )
 from sidekick.errors import ClientError
+from sidekick.openai_tool_loop import run_openai_tool_loop
 from sidekick.openrouter_catalog import (
     OPENROUTER_BASE_URL,
     PINNED_FREE_MODEL,
@@ -76,6 +81,7 @@ FREE_COOLDOWN_SECONDS = 600.0
 PROBE_MAX_TOKENS = 16
 _DENY = {"data_collection": "deny"}
 _RETRY_STATUSES = frozenset({429, 502, 503})
+_REQUIRE_PARAMETERS = "require_parameters"
 
 _GATED_STEP = "Gate Free Endpoints by Agentic Harness"
 _DATA_POLICY_STEP = "Filter by Data Policy"
@@ -136,6 +142,44 @@ def _error_parts(payload: Any, status: int) -> tuple[str, Optional[str], Optiona
         step if isinstance(step, str) else None,
         code if isinstance(code, int) else None,
     )
+
+
+def _choice_parts(data: dict[str, Any]) -> tuple[dict[str, Any], Optional[str]]:
+    """The first choice's message (a dict, possibly empty) and its finish_reason."""
+    choice = (data.get("choices") or [{}])[0]
+    if not isinstance(choice, dict):
+        return {}, None
+    message = choice.get("message")
+    reason = choice.get("finish_reason")
+    return (
+        message if isinstance(message, dict) else {},
+        reason if isinstance(reason, str) else None,
+    )
+
+
+def _first_choice(data: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """The first choice's text content (None unless a string) and its finish_reason."""
+    message, reason = _choice_parts(data)
+    text = message.get("content")
+    return (text if isinstance(text, str) else None), reason
+
+
+def _round_body(
+    body: dict[str, Any], history: list[dict[str, Any]], allow_tools: bool
+) -> dict[str, Any]:
+    """One tool-loop round's request: `body` with this round's messages. allow_tools=False
+    drops `tools` and provider.require_parameters (keeping any data-collection deny)."""
+    round_body = {**body, "messages": history}
+    if not allow_tools:
+        round_body.pop("tools", None)
+        provider = {
+            k: v for k, v in round_body.get("provider", {}).items() if k != _REQUIRE_PARAMETERS
+        }
+        if provider:
+            round_body["provider"] = provider
+        else:
+            round_body.pop("provider", None)
+    return round_body
 
 
 class OpenRouterClient:
@@ -229,15 +273,24 @@ class OpenRouterClient:
     def entry(self, model_id: str) -> Optional[ORModel]:
         return next((m for m in self._catalog if m.id == model_id), None)
 
+    def tools_supported(self, model: str) -> bool:
+        """True when file tools are on and the catalog says `model` accepts tool definitions."""
+        if not self._config.file_tools.enabled:
+            return False
+        entry = self.entry(model)
+        return entry is not None and entry.tools_supported
+
     @property
     def free_candidates(self) -> list[str]:
-        """Free models to try now: not gated for this key, not cooling after a 429."""
+        """Free models to try now: not gated for this key, not cooling after a 429.
+
+        With file tools on, tool-capable models come first."""
         now = self._clock()
-        return [
-            m
-            for m in free_candidates(self._catalog)
-            if m not in self._gated and self._cooling.get(m, 0.0) <= now
-        ]
+        ids = free_candidates(self._catalog)
+        if self._config.file_tools.enabled:
+            tooled = free_candidates(self._catalog, tools=True)
+            ids = tooled + [m for m in ids if m not in tooled]
+        return [m for m in ids if m not in self._gated and self._cooling.get(m, 0.0) <= now]
 
     def fallback_for(self, model: str) -> Optional[str]:
         if not is_free(model):
@@ -373,24 +426,48 @@ class OpenRouterClient:
         max_tokens = min(
             DEFAULT_MAX_TOKENS, (entry and entry.max_completion_tokens) or DEFAULT_MAX_TOKENS
         )
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         messages += [{"role": m.role, "content": m.content} for m in session.history]
         messages.append({"role": "user", "content": prompt})
         body: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
         block = self._config.openrouter.block_data_collection
-        if block or model in self._deny_models:
-            body["provider"] = dict(_DENY)
+        deny = block or model in self._deny_models
+        tool_registry = registry if registry is not None and self.tools_supported(model) else None
+        provider: dict[str, Any] = dict(_DENY) if deny else {}
+        if tool_registry is not None:
+            body["tools"] = tool_registry.openai_tools()
+            provider[_REQUIRE_PARAMETERS] = True
+        if provider:
+            body["provider"] = provider
         effort = map_effort(thinking or self.default_thinking, entry)
         if effort is not None:
             body["reasoning"] = {"effort": effort, "exclude": True}
         retries = FREE_MAX_RETRIES if is_free(model) else _MAX_RETRIES
         try:
-            data = await self._post(body, retries=retries)
+            if tool_registry is None:
+                text, reason = _first_choice(await self._post(body, retries=retries))
+            else:
+
+                async def post(history: list[dict[str, Any]], allow_tools: bool) -> dict[str, Any]:
+                    round_body = _round_body(body, history, allow_tools)
+                    message, finish = _choice_parts(await self._post(round_body, retries=retries))
+                    return {"message": message, "finish_reason": finish}
+
+                text, reason = await run_openai_tool_loop(
+                    post, messages, tool_registry, records if records is not None else []
+                )
         except OpenRouterError as exc:
             if exc.data_policy:
-                if block:
+                if tool_registry is not None:
+                    clause = " and doesn't collect data" if deny else ""
+                    refusal = (
+                        f"[sidekick] Not sent: no provider for `{model}` that supports tool "
+                        f"calling{clause} is available right now. Retry without repository "
+                        "access by pasting the code, or pick another model (list_models)."
+                    )
+                elif block:
                     refusal = blocked_message(model)
                 elif model in self._deny_models:
                     refusal = (
@@ -407,10 +484,6 @@ class OpenRouterClient:
                     self._cooling[model] = self._clock() + FREE_COOLDOWN_SECONDS
             raise
 
-        choice = (data.get("choices") or [{}])[0]
-        message = choice.get("message") if isinstance(choice, dict) else None
-        text = message.get("content") if isinstance(message, dict) else None
-        reason = choice.get("finish_reason") if isinstance(choice, dict) else None
         if not isinstance(text, str) or not text.strip():
             if reason == "length":
                 raise ClientError(

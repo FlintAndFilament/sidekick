@@ -1,13 +1,26 @@
 import logging
+from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
 from sidekick.client import MAX_SESSIONS, ClientError
+from sidekick.file_tools import FileTools, build_file_registry
 from sidekick.openrouter import ChatMessage, OpenRouterError
 from sidekick.openrouter_catalog import PINNED_FREE_MODEL
+from sidekick.sandbox import Sandbox
+from sidekick.tool_loop import ToolCallRecord, ToolRegistry
 from tests._fakes import FAKE_OPENROUTER_KEY
-from tests._openrouter_fixtures import GATED_403, FakeOpenRouter, make_client, reply
+from tests._openrouter_fixtures import (
+    DATA_POLICY_404,
+    GATED_403,
+    FakeOpenRouter,
+    entry,
+    make_client,
+    reply,
+    tool_reply,
+)
 
 GROK = "x-ai/grok-4.7"
 
@@ -197,3 +210,167 @@ async def test_connect_error_is_still_retried(tmp_path):
     c = make_client(fake, tmp_path)
     await c.ask(c.get_or_create_session("a", GROK), "q")
     assert len(fake.posts) == 2
+
+
+# --- File tools (OpenAI-format function calling) ---------------------------------------------
+
+TOOLED = "x-ai/grok-4.7"
+PLAIN = "qwen/qwen3.8-max-0902"
+NEMO = "nvidia/nemotron-3-ultra-550b-a55b:free"
+GEMMA = "google/gemma-4-31b-it:free"
+INKLING = "thinkingmachines/inkling-2-small:free"
+
+
+def _catalog() -> list[dict[str, Any]]:
+    return [entry(TOOLED, tools=True), entry(PLAIN), entry(NEMO, "0", "0", tools=True)]
+
+
+@pytest.fixture
+def registry(tmp_path: Path) -> ToolRegistry:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# sidekick readme\n")
+    return build_file_registry(FileTools(Sandbox(repo), max_write_bytes=1024), write=False)
+
+
+async def test_tools_sent_only_when_registry_and_model_supports_tools(tmp_path, registry):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path)
+    assert c.tools_supported(TOOLED)
+    await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    body = fake.posts[-1]
+    assert len(body["tools"]) == 4
+    assert body["provider"] == {"require_parameters": True}
+
+
+async def test_tools_merge_with_deny_routing(tmp_path, registry):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path, block_data_collection=True)
+    await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    assert fake.posts[-1]["provider"] == {"data_collection": "deny", "require_parameters": True}
+
+
+async def test_no_tools_without_registry(tmp_path):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path)
+    await c.ask(c.get_or_create_session("a", TOOLED), "q")
+    assert "tools" not in fake.posts[-1] and "provider" not in fake.posts[-1]
+
+
+async def test_no_tools_for_model_without_tool_support(tmp_path, registry):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path)
+    assert not c.tools_supported(PLAIN)
+    await c.ask(c.get_or_create_session("a", PLAIN), "q", registry=registry)
+    assert "tools" not in fake.posts[-1] and "provider" not in fake.posts[-1]
+
+
+async def test_no_tools_when_catalog_not_loaded(tmp_path, registry):
+    fake = FakeOpenRouter(catalog_status=500, replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path)
+    assert not c.catalog_loaded and not c.tools_supported(TOOLED)
+    await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    assert "tools" not in fake.posts[-1] and "provider" not in fake.posts[-1]
+
+
+async def test_no_tools_when_file_tools_disabled(tmp_path, registry):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, reply("ok"))])
+    c = make_client(fake, tmp_path, file_tools={"enabled": False})
+    assert not c.tools_supported(TOOLED)
+    await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    assert "tools" not in fake.posts[-1]
+
+
+async def test_tool_round_trip_reads_real_file(tmp_path, registry):
+    fake = FakeOpenRouter(
+        catalog=_catalog(),
+        replies=[(200, tool_reply(("read_file", '{"path": "README.md"}'))), (200, reply("seen"))],
+    )
+    c = make_client(fake, tmp_path)
+    records: list[ToolCallRecord] = []
+    s = c.get_or_create_session("a", TOOLED)
+    assert await c.ask(s, "q", registry=registry, records=records) == "seen"
+    assert len(records) == 1 and records[0].ok and records[0].name == "read_file"
+    second = fake.posts[1]["messages"]
+    assert second[-2]["tool_calls"][0]["id"] == "call_0"
+    assert second[-1]["role"] == "tool" and second[-1]["tool_call_id"] == "call_0"
+    assert "sidekick readme" in second[-1]["content"]
+    assert len(fake.posts[1]["tools"]) == 4
+
+
+async def test_history_commits_prompt_and_final_answer_only(tmp_path, registry):
+    fake = FakeOpenRouter(
+        catalog=_catalog(),
+        replies=[(200, tool_reply(("list_dir", ""))), (200, reply("answer"))],
+    )
+    c = make_client(fake, tmp_path)
+    s = c.get_or_create_session("a", TOOLED)
+    await c.ask(s, "q", registry=registry, records=[])
+    assert s.history == [ChatMessage("user", "q"), ChatMessage("assistant", "answer")]
+
+
+async def test_forced_final_round_drops_tools_and_require_parameters(tmp_path, registry):
+    turn = tool_reply(("list_dir", "{}"))
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, turn)] * 20 + [(200, reply("final"))])
+    c = make_client(fake, tmp_path, block_data_collection=True)
+    assert await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry) == "final"
+    last = fake.posts[-1]
+    assert len(fake.posts) == 21
+    assert "tools" not in last and last["provider"] == {"data_collection": "deny"}
+
+
+async def test_length_with_no_text_after_tools(tmp_path, registry):
+    fake = FakeOpenRouter(
+        catalog=_catalog(),
+        replies=[(200, tool_reply(("list_dir", "{}"))), (200, reply(None, "length"))],
+    )
+    c = make_client(fake, tmp_path)
+    s = c.get_or_create_session("a", TOOLED)
+    records: list[ToolCallRecord] = []
+    with pytest.raises(ClientError, match="whole output budget"):
+        await c.ask(s, "q", registry=registry, records=records)
+    assert len(records) == 1 and s.history == []
+
+
+async def test_empty_answer_after_tools(tmp_path, registry):
+    fake = FakeOpenRouter(
+        catalog=_catalog(),
+        replies=[(200, tool_reply(("list_dir", "{}"))), (200, reply("  ", "stop"))],
+    )
+    c = make_client(fake, tmp_path)
+    with pytest.raises(ClientError, match="empty answer"):
+        await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+
+
+@pytest.mark.parametrize("block", [False, True])
+async def test_tools_aware_404_message(tmp_path, registry, block):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, DATA_POLICY_404)])
+    c = make_client(fake, tmp_path, block_data_collection=block)
+    with pytest.raises(OpenRouterError) as err:
+        await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    clause = " and doesn't collect data" if block else ""
+    assert str(err.value) == (
+        f"[sidekick] Not sent: no provider for `{TOOLED}` that supports tool calling{clause} "
+        "is available right now. Retry without repository access by pasting the code, "
+        "or pick another model (list_models)."
+    )
+    assert err.value.status == 404
+
+
+async def test_404_without_tools_keeps_existing_message(tmp_path):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, DATA_POLICY_404)])
+    c = make_client(fake, tmp_path, block_data_collection=True)
+    with pytest.raises(OpenRouterError) as err:
+        await c.ask(c.get_or_create_session("a", TOOLED), "q")
+    assert "tool calling" not in str(err.value)
+
+
+def test_free_default_and_fallback_prefer_tool_capable(tmp_path):
+    catalog = [entry(NEMO, "0", "0"), entry(GEMMA, "0", "0", tools=True)]
+    catalog.append(entry(INKLING, "0", "0", ctx=128_000, tools=True))
+    c = make_client(FakeOpenRouter(catalog=catalog), tmp_path)
+    assert c.resolve_model(None) == GEMMA
+    assert c.fallback_for(GEMMA) == INKLING
+    assert c.fallback_for(INKLING) == GEMMA
+    off = make_client(FakeOpenRouter(catalog=catalog), tmp_path, file_tools={"enabled": False})
+    assert off.resolve_model(None) == NEMO

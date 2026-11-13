@@ -261,6 +261,10 @@ class GeminiClient:
     def backends(self) -> list["GeminiClient"]:
         return [self]
 
+    def tools_supported(self, model: str) -> bool:
+        """Every Gemini model can carry the file tools."""
+        return True
+
     def fallback_for(self, model: str) -> Optional[str]:
         """The model to retry on after a terminal 503/429, or None when already on it."""
         return None if model == self.fallback_model else self.fallback_model

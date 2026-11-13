@@ -309,14 +309,16 @@ async def test_history_commits_prompt_and_final_answer_only(tmp_path, registry):
     assert s.history == [ChatMessage("user", "q"), ChatMessage("assistant", "answer")]
 
 
-async def test_forced_final_round_drops_tools_and_require_parameters(tmp_path, registry):
+async def test_forced_final_round_keeps_tools_with_tool_choice_none(tmp_path, registry):
     turn = tool_reply(("list_dir", "{}"))
     fake = FakeOpenRouter(catalog=_catalog(), replies=[(200, turn)] * 20 + [(200, reply("final"))])
     c = make_client(fake, tmp_path, block_data_collection=True)
     assert await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry) == "final"
     last = fake.posts[-1]
     assert len(fake.posts) == 21
-    assert "tools" not in last and last["provider"] == {"data_collection": "deny"}
+    assert len(last["tools"]) == 4 and last["tool_choice"] == "none"
+    assert last["provider"] == {"data_collection": "deny", "require_parameters": True}
+    assert all("tool_choice" not in b for b in fake.posts[:-1])
 
 
 async def test_length_with_no_text_after_tools(tmp_path, registry):

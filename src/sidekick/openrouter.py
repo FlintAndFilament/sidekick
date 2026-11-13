@@ -168,17 +168,11 @@ def _round_body(
     body: dict[str, Any], history: list[dict[str, Any]], allow_tools: bool
 ) -> dict[str, Any]:
     """One tool-loop round's request: `body` with this round's messages. allow_tools=False
-    drops `tools` and provider.require_parameters (keeping any data-collection deny)."""
+    keeps `tools` and provider.require_parameters (the history holds tool messages, so the
+    provider must still speak tools) and adds tool_choice="none" to forbid more calls."""
     round_body = {**body, "messages": history}
     if not allow_tools:
-        round_body.pop("tools", None)
-        provider = {
-            k: v for k, v in round_body.get("provider", {}).items() if k != _REQUIRE_PARAMETERS
-        }
-        if provider:
-            round_body["provider"] = provider
-        else:
-            round_body.pop("provider", None)
+        round_body["tool_choice"] = "none"
     return round_body
 
 

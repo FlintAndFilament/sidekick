@@ -297,13 +297,18 @@ Also in `v0.5.0`:
 - `help(topic=<tool>)` describes the backend the tool runs on, matching its MCP description;
   with OpenRouter as the default it described Gemini.
 
+### OpenRouter tool use follow-ups (#139) — 0.7.4
+
+- Thinking models across tool rounds verified live: Anthropic and Gemini 3 through OpenRouter
+  both complete two tool rounds with `thinking="low"`.
+- A `require_parameters` 404 (no provider takes `tools`) gets the tools-aware message instead
+  of OpenRouter's raw text, and the free default falls back to another free model on it.
+
 ---
 
 ## Open
 
 - Per-model / per-user tool configuration for OpenRouter (the second half of #132).
-- OpenRouter tool use follow-ups (#139): check thinking models across tool rounds, and give a
-  clear message when no provider for a model supports tools.
 - Web search for OpenRouter models: none today, `web=true` is ignored with a notice.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).

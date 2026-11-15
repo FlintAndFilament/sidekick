@@ -566,7 +566,8 @@ wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run
 - Calls that carry tools set `provider.require_parameters: true`, so OpenRouter routes only to
   providers that support tool calling. If none is available (also counting
   `block_data_collection`), OpenRouter forwards the call nowhere, and the message says so
-  instead of the plain privacy refusal.
+  instead of OpenRouter's raw text or the plain privacy refusal. On the free default, sidekick
+  then falls back to another free model.
 - On the round cap, the forced final request keeps the tool definitions and sends
   `tool_choice: "none"`, so the provider still accepts the tool history but cannot call again.
 - Arguments that are not a JSON object go back to the model as
@@ -583,11 +584,10 @@ wire format differs (OpenAI-format `tools` / `tool_calls` / `tool` messages, run
   Saying no, or running unattended, sends the call without file tools, and the reply starts with
   a notice saying which. Agreed models are remembered in
   [`openrouter.repo_access_models`](configuration.md#openrouterrepo_access_models).
-- **Thinking models are not yet verified.** Tool use over several rounds is verified on the
-  default free model. Thinking models that need their reasoning state sent back between tool
-  rounds (for example Gemini 3 through OpenRouter, `google/gemini-3*`) are not yet verified and
-  may fail on the second tool round. For those, use `model=flash` or `model=pro`, which runs on
-  Gemini directly when Gemini is configured.
+- **Thinking models.** Tool use over several rounds, with `thinking="low"`, is verified live on
+  the default free model, on Anthropic (`anthropic/claude-haiku-5.5`) and on Gemini 3 through
+  OpenRouter (`google/gemini-3.1-flash-lite`), on 2026-11-15. sidekick sends each assistant turn
+  back unchanged, including any reasoning details the provider returned.
 - **File tools off means conversation only.** When the server runs with file tools off (launched
   from your home directory or the filesystem root, or `file_tools.enabled=false`), no OpenRouter
   model gets them, and the model hint and instructions say so.

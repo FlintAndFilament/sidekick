@@ -88,6 +88,10 @@ _REQUIRE_PARAMETERS = "require_parameters"
 
 _GATED_STEP = "Gate Free Endpoints by Agentic Harness"
 _DATA_POLICY_STEP = "Filter by Data Policy"
+# provider.require_parameters with no endpoint that takes every parameter sent (#139). The
+# step name is from public reports, not yet seen by sidekick, so the message is matched too.
+_PARAMETERS_STEP = "Filter by Parameters"
+_PARAMETERS_MESSAGE = "requested parameters"
 _KEY_REJECTED = (
     "OpenRouter rejected the API key (HTTP 401). Fix: run /plugin configure sidekick@sidekick, "
     "paste your key on the OpenRouter API key row, press Enter, then run /reload-plugins."
@@ -129,6 +133,23 @@ class OpenRouterError(ClientError):
     @property
     def data_policy(self) -> bool:
         return self.status == 404 and self.routing_step == _DATA_POLICY_STEP
+
+    @property
+    def no_tool_provider(self) -> bool:
+        """404 from require_parameters: no endpoint for the model takes `tools` right now."""
+        if self.status != 404:
+            return False
+        if self.routing_step == _PARAMETERS_STEP:
+            return True
+        return self.routing_step is None and _PARAMETERS_MESSAGE in str(self)
+
+
+def _no_tool_provider_message(model: str, clause: str) -> str:
+    return (
+        f"[sidekick] Not sent: no provider for `{model}` that supports tool "
+        f"calling{clause} is available right now. Retry without repository "
+        "access by pasting the code, or pick another model (list_models)."
+    )
 
 
 def _error_parts(payload: Any, status: int) -> tuple[str, Optional[str], Optional[int]]:
@@ -303,7 +324,9 @@ class OpenRouterClient:
 
     @staticmethod
     def can_fall_back(exc: ClientError) -> bool:
-        return isinstance(exc, OpenRouterError) and (exc.status in (429, 503) or exc.gated)
+        return isinstance(exc, OpenRouterError) and (
+            exc.status in (429, 503) or exc.gated or exc.no_tool_provider
+        )
 
     def cached_privacy(self, model: str) -> Optional[PrivacyStatus]:
         entry = self._privacy.get(model)
@@ -512,14 +535,15 @@ class OpenRouterClient:
                     post, messages, tool_registry, records if records is not None else []
                 )
         except OpenRouterError as exc:
+            if exc.no_tool_provider and tool_registry is not None:
+                # A free default may fall back to another free model (can_fall_back).
+                raise OpenRouterError(
+                    _no_tool_provider_message(model, ""), status=404, routing_step=_PARAMETERS_STEP
+                ) from exc
             if exc.data_policy:
                 if tool_registry is not None:
                     clause = " and doesn't collect data" if deny else ""
-                    refusal = (
-                        f"[sidekick] Not sent: no provider for `{model}` that supports tool "
-                        f"calling{clause} is available right now. Retry without repository "
-                        "access by pasting the code, or pick another model (list_models)."
-                    )
+                    refusal = _no_tool_provider_message(model, clause)
                 elif block:
                     refusal = blocked_message(model)
                 elif model in self._deny_models:

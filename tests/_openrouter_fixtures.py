@@ -112,6 +112,21 @@ DATA_POLICY_404 = {
         "metadata": {"failed_routing_step": "Filter by Data Policy"},
     }
 }
+# Shape reported for provider.require_parameters when no endpoint takes every parameter
+# sent (#139); sidekick has not captured its own yet, so the message is matched as well.
+PARAMETERS_404 = {
+    "error": {
+        "code": 404,
+        "message": "No endpoints found that can handle the requested parameters.",
+        "metadata": {"failed_routing_step": "Filter by Parameters"},
+    }
+}
+PARAMETERS_404_NO_STEP = {
+    "error": {
+        "code": 404,
+        "message": "No endpoints found that can handle the requested parameters.",
+    }
+}
 GATED_403 = {
     "error": {
         "code": 403,

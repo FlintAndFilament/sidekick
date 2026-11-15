@@ -290,6 +290,13 @@ Also in `v0.5.0`:
   effect after `/reload-plugins`. `/sidekick:setup` goes back to model choice on a
   `[sidekick] Not checked` reply.
 
+### Docs and help match 0.7.2 — 0.7.3
+
+- README, `docs/` and the diagrams checked against the code: consent questions, OpenRouter
+  repository access, OpenRouter-only startup, logging set up in `main()`.
+- `help(topic=<tool>)` describes the backend the tool runs on, matching its MCP description;
+  with OpenRouter as the default it described Gemini.
+
 ---
 
 ## Open

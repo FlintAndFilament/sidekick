@@ -307,3 +307,46 @@ class TestHelpTool:
         mcp = _server(tmp_path, _workspace(tmp_path))
         assert mcp.instructions is not None
         assert len(mcp.instructions) <= INSTRUCTIONS_BUDGET
+
+
+class TestToolHelpMatchesSurface:
+    """help(topic=<tool>) must describe the backend the tool actually runs on."""
+
+    @pytest.mark.parametrize(
+        "surface",
+        [
+            Surface("openrouter", False, False, False, False),
+            Surface("openrouter", True, False, False, True),
+            Surface("gemini", True, True, False, True),
+        ],
+    )
+    @pytest.mark.parametrize("cap", CAPABILITIES, ids=lambda c: c.name)
+    def test_tool_topic_uses_the_surface_backend(
+        self, tmp_path: Path, surface: Surface, cap: Any
+    ) -> None:
+        from sidekick.tools.base import capability_hint
+
+        workspace = _workspace(tmp_path)
+        text = help_text(
+            workspace,
+            web_default=surface.web_default,
+            web_supported=surface.web_supported,
+            topic=cap.name,
+            surface=surface,
+        )
+        expected = capability_hint(
+            workspace,
+            write=cap.write,
+            artifacts=cap.artifacts,
+            web_default=surface.web_default,
+            web_supported=surface.web_supported,
+            default_backend=surface.primary,
+            gemini_available=surface.gemini_available,
+            files=surface.files,
+        )
+        assert text == f"{cap.name}: {cap.summary}" + expected
+
+    def test_openrouter_without_tools_help_says_conversation_only(self, tmp_path: Path) -> None:
+        surface = Surface("openrouter", False, False, False, False)
+        text = help_text(_workspace(tmp_path), topic="ask", surface=surface)
+        assert "conversation only" in text

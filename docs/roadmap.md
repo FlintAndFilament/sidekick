@@ -297,7 +297,7 @@ Also in `v0.5.0`:
 - `help(topic=<tool>)` describes the backend the tool runs on, matching its MCP description;
   with OpenRouter as the default it described Gemini.
 
-### OpenRouter tool use follow-ups (#139)
+### OpenRouter tool use follow-ups (#139) — 0.7.4
 
 - Thinking models across tool rounds verified live: Anthropic and Gemini 3 through OpenRouter
   both complete two tool rounds with `thinking="low"`.

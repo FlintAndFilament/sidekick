@@ -28,7 +28,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from sidekick import models
+from sidekick import consent, models
 from sidekick.backends import Elicit, ModelSource
 from sidekick.client import ClientError, GeminiClient
 from sidekick.openrouter import OpenRouterClient
@@ -209,9 +209,9 @@ async def render_openrouter(
             )
         if not is_free(check) and not client.is_accepted(check):
             # The probe is a billed request to a model the user has not accepted (#142).
+            outcome = await consent.ask(elicit, "billed_check", check, check_question(check, found))
             if elicit is None:
                 return check_unaskable_message(check)
-            outcome = await elicit(check_question(check, found))
             if outcome == "unavailable":
                 return check_unaskable_message(check)
             if outcome != "accept":

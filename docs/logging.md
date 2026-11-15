@@ -41,7 +41,7 @@ setup mode comes up.
 
 | Level | What you see | When to use |
 |---|---|---|
-| `INFO` | Startup: resolved latest Gemini models, file-tools state with sandbox root and artifacts directory, primary backend, default model and Gemini state (`on`, `off`, `unavailable`), transcript path. Also a file tool that raised, and a grounding redirect that did not resolve | Default — daily use |
+| `INFO` | Startup: resolved latest Gemini models, file-tools state with sandbox root and artifacts directory, primary backend, default model and Gemini state (`on`, `off`, `unavailable`), transcript path. Also a file tool that raised, a grounding redirect that did not resolve, and one `consent` line per question sidekick asked you (see below) | Default — daily use |
 | `WARNING` | Retries on 503/429 and falling back to the fallback model; thinking-level adjustments; web access requested on Google Cloud Agent Platform (formerly Vertex AI); a model name that doesn't suit the backend (a preview id on `api_key`, a `-latest` alias on Agent Platform); `inference failed …` before a fallback or retry decision; sandbox rejections; `grep` timeouts; tool-loop round cap; malformed function calls; empty Gemini responses; latest-model resolution failures; transcript write failures; `Gemini backend unavailable; serving OpenRouter only`; `OpenRouter catalog unavailable`; OpenRouter HTTP and transport retries; `elicitation unavailable` (sidekick could not ask the user); `accepted for <model> this session only`, `repository access granted for <model> this session only` and `Gemini data-use terms accepted for this session only` (an answer that could not be saved to `config.json`) | Included at INFO |
 | `ERROR` | Startup failures (config, auth with method and source, `transcript_dir`, `artifacts_dir`, or an unexpected error with its traceback), after which the server stays up in setup mode; inference failures (with tool + session); preflight failures; fallback also failed; overload after a write (not retried); artifact not saved; `models.list` failures | Included at INFO |
 | `DEBUG` | Per call: tool, session, model, backend, thinking level; request model, prompt length, number of file tools, web on/off; response length; credential loading; session-cache evictions. Also the libraries' own debug output, including one httpx line per HTTP request | Troubleshooting |
@@ -82,6 +82,20 @@ which repeats the problem to Claude (see [tools.md](tools.md#tools-reference)).
 concrete model it resolved to. `tools=` counts the file tools offered to Gemini (4 read-only,
 5 with `write_file`, 0 when file tools are off). The `ask:` and `response_len` lines are
 Gemini's; an OpenRouter call logs only the `sidekick.tools.base` lines.
+
+**Consent questions (INFO):**
+```
+[sidekick] 14:33:02 INFO     sidekick.consent: consent model_use model=anthropic/claude-haiku-5.5 outcome=accept
+[sidekick] 14:33:09 INFO     sidekick.consent: consent repo_access model=anthropic/claude-haiku-5.5 outcome=decline
+```
+
+One line per question sidekick puts to you, or would have put when it can't ask. The kind is
+`model_use` (price and privacy, first use of an OpenRouter model), `repo_access` (letting a
+model read the repository), `billed_check` (`list_models check=` on a paid model) or
+`gemini_data_use` (first Gemini API-key call). The outcome is `accept`, `decline`, `cancel`
+(you dismissed the prompt) or `unavailable` (sidekick couldn't ask, so nothing that needed the
+answer was sent). The line holds no question or prompt text. Unlike `config.json`, which keeps
+only a yes, this records declines too.
 
 ## Enabling debug mode
 

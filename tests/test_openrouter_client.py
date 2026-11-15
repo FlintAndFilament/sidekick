@@ -15,6 +15,8 @@ from tests._fakes import FAKE_OPENROUTER_KEY
 from tests._openrouter_fixtures import (
     DATA_POLICY_404,
     GATED_403,
+    PARAMETERS_404,
+    PARAMETERS_404_NO_STEP,
     FakeOpenRouter,
     entry,
     make_client,
@@ -376,3 +378,51 @@ def test_free_default_and_fallback_prefer_tool_capable(tmp_path):
     assert c.fallback_for(INKLING) == GEMMA
     off = make_client(FakeOpenRouter(catalog=catalog), tmp_path, file_tools={"enabled": False})
     assert off.resolve_model(None) == NEMO
+
+
+# require_parameters 404: no endpoint for the model takes `tools` (#139).
+_NO_TOOLS_MSG = (
+    "[sidekick] Not sent: no provider for `{model}` that supports tool calling is available "
+    "right now. Retry without repository access by pasting the code, or pick another model "
+    "(list_models)."
+)
+
+
+@pytest.mark.parametrize("body", [PARAMETERS_404, PARAMETERS_404_NO_STEP])
+async def test_parameters_404_with_tools_gets_tools_aware_message(tmp_path, registry, body):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, body)])
+    c = make_client(fake, tmp_path)
+    with pytest.raises(OpenRouterError) as err:
+        await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    assert str(err.value) == _NO_TOOLS_MSG.format(model=TOOLED)
+    assert err.value.status == 404 and err.value.no_tool_provider
+
+
+async def test_parameters_404_on_a_free_model_may_fall_back(tmp_path, registry):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, PARAMETERS_404)])
+    c = make_client(fake, tmp_path)
+    with pytest.raises(OpenRouterError) as err:
+        await c.ask(c.get_or_create_session("a", NEMO), "q", registry=registry)
+    assert c.can_fall_back(err.value)
+
+
+async def test_parameters_404_on_a_paid_model_is_not_a_fallback(tmp_path, registry):
+    # can_fall_back is only consulted for free models, but keep the paid case explicit.
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, PARAMETERS_404)])
+    c = make_client(fake, tmp_path)
+    with pytest.raises(OpenRouterError):
+        await c.ask(c.get_or_create_session("a", TOOLED), "q", registry=registry)
+    assert c.fallback_for(TOOLED) is None
+
+
+def test_data_policy_404_is_not_a_tool_provider_miss():
+    err = OpenRouterError("m", status=404, routing_step="Filter by Data Policy")
+    assert err.data_policy and not err.no_tool_provider
+
+
+async def test_parameters_404_without_tools_keeps_raw_message(tmp_path):
+    fake = FakeOpenRouter(catalog=_catalog(), replies=[(404, PARAMETERS_404)])
+    c = make_client(fake, tmp_path)
+    with pytest.raises(OpenRouterError) as err:
+        await c.ask(c.get_or_create_session("a", PLAIN), "q")
+    assert "tool calling" not in str(err.value)

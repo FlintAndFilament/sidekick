@@ -1,5 +1,23 @@
 flowchart TD
-    A["list_models(refresh?)"] --> B{cached and not refresh?}
+    A["list_models(refresh?, query?, check?)"] --> OK{OpenRouter key set?}
+    OK -->|no| B
+    OK -->|yes| CL{"catalog loaded?<br/>(refresh=true re-fetches it)"}
+    CL -->|no| CU["'catalog unavailable' notice"]
+    CL -->|yes| Q{"check= / query= / neither"}
+    Q -->|neither| FEAT[featured picks + free models, live prices]
+    Q -->|query| SR[search ids and names, max 40 rows]
+    Q -->|check| IN{in the catalog?}
+    IN -->|no| NIC["'not in OpenRouter's catalog'"]
+    IN -->|yes| PAID{"paid and not yet accepted?"}
+    PAID -->|no| PROBE["privacy probe (one tiny request)<br/>price + privacy sentence"]
+    PAID -->|yes| ASKQ{"elicitation: billed check at its price?"}
+    ASKQ -->|accept| PROBE
+    ASKQ -->|"decline / cancel"| ND["'[sidekick] Not checked: you declined'<br/>nothing sent"]
+    ASKQ -->|"can't ask"| NU["'[sidekick] Not checked'<br/>accept the model first; nothing sent"]
+    CU & FEAT & SR & NIC & PROBE & ND & NU --> GS{Gemini configured?}
+    GS -->|yes| B
+    GS -->|no| OUT[return the sections]
+    B{"Gemini: cached and not refresh?"}
     B -->|yes| C[return cached table]
     B -->|no| D["client.list_models → backend models.list"]
     D --> E{fetch ok?}

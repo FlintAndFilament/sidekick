@@ -6,7 +6,7 @@ What has shipped, what is open, and what is parked. Rebuilt from git history and
 The `26.7.x` labels are the names the July releases went out under. Work after 26.7.4 is grouped
 by feature and issue number. From the plugin on, releases carry the plugin version
 (`.claude-plugin/plugin.json`): 0.1.0 plugin, 0.2.0 and 0.3.0 rename, 0.4.0 `list_sessions`
-(tagged `v0.4.0`), 0.5.0 auth set up inside Claude Code (tagged `v0.5.0`).
+(tagged `v0.4.0`), 0.5.0 auth set up inside Claude Code (tagged `v0.5.0`). Later versions are in the headings below.
 
 The project was called gemini-bridge until 2026-09-24 (#104). Upgrading an older install: **first** run `mv ~/.config/gemini-bridge ~/.config/sidekick`, then update from a terminal with `claude plugin marketplace update sidekick && claude plugin update sidekick@sidekick`, then run `/reload-plugins` in Claude Code. (Move the folder before updating: after the update, the new server has already created `~/.config/sidekick/`, and `mv` nests the old folder inside it. `/plugin update` inside a session does not update the plugin.)
 
@@ -284,11 +284,19 @@ Also in `v0.5.0`:
 - Importing `sidekick.__main__` no longer touches the log directory; `main()` configures
   logging. Approach from PR #137 by @bfs2021 (co-author), re-implemented on current `develop`.
 
+### Consent wording (#142) — 0.7.2
+
+- Refusals that mention a config edit say only the user should make it, and that it takes
+  effect after `/reload-plugins`. `/sidekick:setup` goes back to model choice on a
+  `[sidekick] Not checked` reply.
+
 ---
 
 ## Open
 
 - Per-model / per-user tool configuration for OpenRouter (the second half of #132).
+- OpenRouter tool use follow-ups (#139): check thinking models across tool rounds, and give a
+  clear message when no provider for a model supports tools.
 - Web search for OpenRouter models: none today, `web=true` is ignored with a notice.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).

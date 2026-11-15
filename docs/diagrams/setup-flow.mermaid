@@ -8,7 +8,8 @@ flowchart TD
     PATH -->|"O. OpenRouter (recommended)"| O1["you: /plugin configure sidekick@sidekick<br/>paste the key on the OpenRouter API key row, Enter"]
     O1 --> O2["you: /reload-plugins"]
     O2 --> O3["list_models: five picks + free default, live prices"]
-    O3 --> O4["list_models(check=id): price + privacy sentence"]
+    O3 --> O4["list_models(check=id): price + privacy sentence<br/>(a paid model asks before the billed check)"]
+    O4 -->|"'[sidekick] Not checked'"| O3
     O4 --> O5["choose: warn (default) or block_data_collection"]
     O5 --> O6["sidekick-setup openrouter<br/>--default-model --accept --block-data-collection"]
     O6 --> O7["you: /reload-plugins"]
@@ -17,10 +18,10 @@ flowchart TD
     OV -->|"key error"| O1
 
     PATH -->|"A. API key in the keychain<br/>(recommended)"| A1["you: /plugin configure sidekick@sidekick<br/>paste the key on the Gemini API key row, Enter"]
-    A1 --> A2["write --auth-method api_key<br/>--key-source plugin"]
+    A1 --> A2["write --auth-method api_key<br/>--key-source plugin<br/>(the first call asks about Google's data use)"]
 
     PATH -->|"B. API key from an env var"| B1["ask the variable NAME<br/>(never the key)"]
-    B1 --> B2["write --auth-method api_key<br/>--api-key-env NAME"]
+    B1 --> B2["write --auth-method api_key<br/>--api-key-env NAME<br/>(the first call asks about Google's data use)"]
 
     PATH -->|"C. Google Cloud Agent Platform"| C0{"sign-in method"}
     C0 -->|adc| C1["gcloud auth application-default login<br/>(+ set-quota-project)"]

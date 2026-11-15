@@ -46,7 +46,7 @@ from google.genai import types
 from google.genai.types import GenerateContentConfig, ThinkingConfig
 from google.genai.types import ThinkingLevel as SDKThinkingLevel
 
-from sidekick import models
+from sidekick import consent, models
 from sidekick.backends import Elicit, Preflight, Session, Surface
 from sidekick.config import (
     CONFIG_PATH,
@@ -305,7 +305,7 @@ class GeminiClient:
         (`elicit` is None, or asking fails): nothing is sent. Declining is asked again next call."""
         if not self._needs_consent:
             return Preflight(True)
-        outcome = await elicit(GEMINI_DATA_USE_QUESTION) if elicit else "unavailable"
+        outcome = await consent.ask(elicit, "gemini_data_use", model, GEMINI_DATA_USE_QUESTION)
         if outcome == "accept":
             self._needs_consent = False
             try:

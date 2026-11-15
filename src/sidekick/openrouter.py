@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import httpx
 
+from sidekick import consent
 from sidekick.backends import Elicit, Preflight, Session
 from sidekick.client import _MAX_RETRIES, _PINNED_BY_FAMILY, _RETRY_BASE_DELAY, MAX_SESSIONS
 from sidekick.config import (
@@ -377,6 +378,7 @@ class OpenRouterClient:
         if self.is_accepted(model):
             return await self._with_repo_consent(model, elicit, want_tools)
         if elicit is None and not is_free(model):  # even the probe is billed: send nothing (#141)
+            consent.record("model_use", model, "unavailable")
             return Preflight(False, message=unattended_paid_refused_message(model))
         status = await self.privacy_status(model)
         block = self._config.openrouter.block_data_collection
@@ -385,10 +387,11 @@ class OpenRouterClient:
                 False, message=f"[sidekick] {blocked_message(model)} Nothing was sent."
             )
         entry = self.entry(model)
-        outcome = (
-            await elicit(acceptance_question(model, entry, status, block=block, repo_access=False))
-            if elicit
-            else "unavailable"
+        outcome = await consent.ask(
+            elicit,
+            "model_use",
+            model,
+            acceptance_question(model, entry, status, block=block, repo_access=False),
         )
         if outcome == "accept":
             self._accepted.add(model)
@@ -426,10 +429,13 @@ class OpenRouterClient:
         if model in self._repo_declined:
             return Preflight(True, tools=False, tools_reason="declined")
         if elicit is None:  # can't ask: no probe, no file tools
+            consent.record("repo_access", model, "unavailable")
             return Preflight(True, tools=False, tools_reason="unasked")
         status = await self.privacy_status(model)
         block = self._config.openrouter.block_data_collection
-        outcome = await elicit(repo_access_question(model, status, block=block))
+        outcome = await consent.ask(
+            elicit, "repo_access", model, repo_access_question(model, status, block=block)
+        )
         if outcome == "accept":
             self._allow_repo(model)
             return Preflight(True, tools=True)

@@ -22,7 +22,8 @@ path **O**: it shows live prices, runs a privacy check and offers a free model.
   [backend-routing](diagrams/backend-routing.mermaid).
 
 OpenRouter models cannot search the web. Those that support tool calling read your repository
-like Gemini does; see [Repository access](tools.md#repository-access).
+like Gemini does, once you allow it for that model; see [Repository access](tools.md#repository-access)
+and [`openrouter.repo_access_models`](configuration.md#openrouterrepo_access_models).
 Prices, the first-use question and privacy settings: [configuration.md](configuration.md#openrouteraccepted_models).
 
 The rest of this page covers the Gemini backends.
@@ -45,7 +46,9 @@ The method names are config values and stay as they are. **Which method applies 
 saved:** with the plugin's **Gemini API key** option filled in and no `auth.method` in
 `config.json` (or no file at all), it is `api_key`. With no key option, a `config.json` that
 names no method means `adc`. With neither a key nor a file, the server starts in setup mode.
-A method saved in `config.json` always wins, even over a filled-in key option.
+The exception is an OpenRouter key: with one set and no `auth.method` or `project` saved, Gemini
+is off and the server runs on OpenRouter only. A method saved in `config.json` always wins, even
+over a filled-in key option.
 
 [Diagram](diagrams/auth-resolution.mermaid): which credential each method uses, in order, and
 every path into setup mode.
@@ -59,7 +62,8 @@ the bridge's file tools is Developer-API only).
 Credentials are loaded once, at server startup. If they are missing or **can't be loaded** (no
 key, no file, an unreadable Keychain item, no ADC), the server starts in **setup mode**: it
 still connects but offers only a `setup_status` tool that explains the problem and the fix, so
-Claude can tell you what to do instead of `/mcp` showing just "Connection closed". The problem
+Claude can tell you what to do instead of `/mcp` showing just "Connection closed". (With an
+OpenRouter key set, a Gemini auth failure doesn't do this: the server serves OpenRouter only.) The problem
 is also written to the log (see [logging.md](logging.md)); the messages are listed in
 [Troubleshooting](#troubleshooting).
 
@@ -358,6 +362,8 @@ server treats both as unset.
 | `Blocked by your setting block_data_collection` | The setting is on and every provider serving that model may store or train on prompts | Pick another model, or turn the setting off ([configuration.md](configuration.md#openrouterblock_data_collection)) |
 | `privacy settings allow` | OpenRouter found no provider the account's privacy settings allow | Change them at https://openrouter.ai/settings/privacy, or pick another model |
 | `only available on agentic harnesses` | A free model refused for this client; sidekick tries the next free model once | Use a paid model, or retry later |
+| `is a paid model and sidekick couldn't ask you to accept its price here` | A paid model not in `accepted_models`, and the client can't ask (no MCP elicitation). Nothing was sent | Accept it in `/sidekick:setup`, or add it to [`openrouter.accepted_models`](configuration.md#openrouteraccepted_models) yourself, then `/reload-plugins` |
+| `no provider for … that supports tool calling … is available right now` | The model's providers that take file tools are all unavailable (or all collect data, under deny routing) | Paste the code instead, or pick another model |
 | `no OpenRouter key is set` | An `author/model` id was used with no OpenRouter key | Paste the key on the **OpenRouter API key** row, then `/reload-plugins` |
 | Only `setup_status` is offered | Setup mode: config or credentials couldn't load at startup | Call `setup_status` (or read the log); it names the problem. Fix it, then restart ([how](#change-settings--reconnect)) |
 | `Config file not found … Run /sidekick:setup` | No `config.json` and no plugin key | Run `/sidekick:setup`, or paste a key on the **Gemini API key** row |
@@ -373,6 +379,8 @@ server treats both as unset.
 | `Keychain value could not be decoded` / `not valid service account JSON` | The Keychain item holds something other than SA JSON (valid JSON that isn't a service account lands here too) | Store the SA key file again with `/sidekick:setup` (it replaces the item) |
 | `'security' CLI not found` | Not macOS | Keychain method is macOS-only |
 | `no API key. The plugin's key option is empty and env var 'GEMINI_API_KEY' is not set` | Neither path A nor path B supplied a key | Paste the key on the **Gemini API key** row, then restart ([how](#change-settings--reconnect)) |
+| `Not sent: you declined Gemini's data-use terms` | You said no to the data-use question for API-key auth | Accept on the next call (it asks again), use an OpenRouter model, or use Agent Platform |
+| `couldn't ask you to accept Gemini's data-use terms here` | API-key auth, and the client can't ask (no MCP elicitation). Nothing was sent | Accept from an interactive session, or set [`gemini_data_use_accepted`](configuration.md#gemini_data_use_accepted) to `true` yourself, then `/reload-plugins` |
 | `'api_key_env' in config.json contains what looks like an API key` | The key itself was put in `api_key_env` | Set `api_key_env` to the variable name, e.g. `"GEMINI_API_KEY"` |
 | `'project' is required for Google Cloud Agent Platform auth methods` | `project` missing with `adc`/`env`/`keychain` | Add `project` to config.json, or switch to `api_key` |
 | `transcript_dir: Transcript directory cannot be used` / `artifacts_dir …` | A configured directory can't be created, or lies outside the project | See [`transcript_dir`](configuration.md#transcript_dir) and [`artifacts_dir`](configuration.md#artifacts_dir) |

@@ -29,11 +29,11 @@ Two problems, in order of severity...
 - **Header:** time, tool name, the requested thinking level (the call's `thinking`, else
   `default_thinking`), and the `session_name`. The model is not recorded here; artifacts name it
   in their header.
-- **Prompt:** the text sent to Gemini. Tools with two inputs combine them, e.g.
+- **Prompt:** the text sent to the model (Gemini or OpenRouter). Tools with two inputs combine them, e.g.
   `review` appends `Focus: <question>`, `architect` `Question: …`,
   `brainstorm` and `debug` `Context: …`.
-- **Tool calls:** present only when Gemini called a tool. One line per call, in order (see below).
-- **Response:** Gemini's answer, followed by the full sources footer when the call was
+- **Tool calls:** present only when the model called a tool. One line per call, in order (see below).
+- **Response:** the model's answer, followed by the full sources footer when the call was
   web-grounded.
 
 Only the five generating tools write entries. `list_models`, `list_sessions` and `help`
@@ -46,9 +46,9 @@ arguments (each argument cut at 60 characters with `…`), then a short summary:
 
 | Line | Summary means |
 |---|---|
-| `→ list_dir() → 802 B` | Size of the result returned into Gemini's context |
+| `→ list_dir() → 802 B` | Size of the result returned into the model's context |
 | `→ write_file(path='x.txt', content='CANARY') → wrote 6 B` | Size of the file written (#77) |
-| `✗ read_file(path='.env') → rejected: …` | The error Gemini got back |
+| `✗ read_file(path='.env') → rejected: …` | The error the model got back |
 | `→ google_search(query='…') → 2 source(s): google.com, android.com` | A web search, naming up to five sources by site title |
 | `→ url_context(url='https://…') → retrieved` | A URL Gemini fetched; a failed fetch reads `✗ … → not retrieved (<status>)` |
 
@@ -56,8 +56,8 @@ Web searches and fetches run inside the Gemini API, not in the bridge, but they 
 here from the response's grounding metadata so every page that entered the context leaves a
 trace. See [tools.md](tools.md#what-is-recorded).
 
-If the requested model was overloaded (503/429) and the call was retried on the fallback model,
-a marker line separates the two attempts:
+If the requested model was overloaded (503/429), or a free OpenRouter model was gated, and the
+call was retried on the fallback model, a marker line separates the two attempts:
 
 ```markdown
 - → read_file(path='README.md') → 8.2 KiB
@@ -83,9 +83,12 @@ that could not be resolved keeps its redirect link, marked `(unresolved Google r
 
 ## What is not in the transcript
 
-- Notices the bridge adds to the reply: the fallback-model notice, the "web access unavailable"
-  notice, and the `artifact saved` / `artifact not saved` line.
-- Failed calls in which Gemini made no tool call. A call that fails after at least one tool call
+- Notices the bridge adds to the reply: the fallback-model notice, first-use and repository
+  notices, the "web access unavailable" notice, and the `artifact saved` / `artifact not saved`
+  line.
+- Calls refused before anything was sent (`[sidekick] Not sent: …`): a declined consent
+  question, or one sidekick couldn't ask.
+- Failed calls in which the model made no tool call. A call that fails after at least one tool call
   is logged, with the error text as its response, so the calls it made are still on record.
 - Anything from `list_models`, `list_sessions` or `help`.
 
@@ -102,7 +105,7 @@ This means:
 - Two servers started in the same minute with the same `transcript_dir` (e.g. two Claude Code
   windows in one project) share a file name, so both append to one file
 
-Gemini conversations (`session_name`) live in server memory, not in the transcript. A restart
+Conversations (`session_name`) live in server memory, not in the transcript. A restart
 starts every session fresh even though the old transcript is still on disk.
 
 ## Transcript directory

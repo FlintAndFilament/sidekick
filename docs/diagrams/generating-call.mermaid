@@ -10,8 +10,20 @@ sequenceDiagram
 
     CC->>T: tool call (prompt, thinking?, session_name?, model?, web?, write_artifact?)
     T->>B: call_gemini(...)
+    B->>B: backend_for(model): Gemini here (OpenRouter: see backend-routing)
     B->>B: resolve_capabilities(write, web)
     B->>C: get_or_create_session(tool:name, model)
+    B->>C: preflight(model, elicit)
+    opt API-key auth, data use not yet accepted (#142)
+        C->>CC: elicitation: Google may use prompts if the key's project has no billing
+        alt accept
+            CC-->>C: accept (saved as gemini_data_use_accepted)
+        else decline, cancel, or client can't ask
+            C-->>B: Preflight(proceed=False)
+            B-->>T: "[sidekick] Not sent: ..." (no transcript)
+            T-->>CC: refusal string
+        end
+    end
     B->>C: ask(session, prompt, registry, web)
     C->>L: run_tool_loop(generate, history, registry)
     loop until a text answer (max 20 rounds)
@@ -27,7 +39,7 @@ sequenceDiagram
         C-->>B: answer
     else retryable 503/429, not on fallback, no write_file yet
         C-->>B: ClientError
-        B->>C: ask(..., fallback model = newest Flash-Lite)
+        B->>C: preflight(fallback), then ask(..., fallback model = newest Flash-Lite)
         C-->>B: answer (notice prefixed later)
     else 503/429 after write_file, non-retryable, or fallback also fails
         C-->>B: ClientError

@@ -6,9 +6,13 @@ Created by `/sidekick:setup`. Safe to edit by hand. The server reads it once at 
 restart it after an edit: see [Change settings & reconnect](auth.md#change-settings--reconnect).
 
 `/sidekick:setup` writes only `project`, `location`, `default_thinking`, `default_model` (when you
-give one), `transcript_dir` and `auth`. Every other field below is optional and takes its default
-until you add it by hand. **Re-running `/sidekick:setup` updates only those fields and leaves the
-rest of the file alone**, so an `artifacts_dir`, `file_tools` or `web_tools` you added by hand survives.
+give one), `transcript_dir` and `auth` on the Gemini paths, and only `openrouter.default_model`,
+`openrouter.accepted_models` and `openrouter.block_data_collection` on the OpenRouter path. The
+server itself adds only your answers to its questions: `openrouter.accepted_models`,
+`openrouter.repo_access_models` and `gemini_data_use_accepted`. Every other field below is
+optional and takes its default until you add it by hand. **Re-running `/sidekick:setup` updates
+only those fields and leaves the rest of the file alone**, so an `artifacts_dir`, `file_tools` or
+`web_tools` you added by hand survives.
 A saved `default_model` is kept when you accept the prompt's default; enter `-` to clear it. If
 the file is not valid JSON, the wizard moves it aside to `config.json.<timestamp>.bak` — one copy
 per broken run, never overwritten — and starts fresh rather than merging into it. The merged
@@ -99,8 +103,9 @@ it via `model=`. The value is not checked when the config loads: a name that isn
 model (anything not shaped `gemini-<version>-…`, a `-latest` alias, or a bridge alias) fails every
 call that uses it with a `[sidekick error] Unrecognized model family` reply, and a well-formed
 id the backend doesn't serve fails with the API's 404. The backend-aware schema hint and
-`list_models` reflect the effective default. See
-[Choosing a model](#choosing-a-model).
+`list_models` reflect the effective default. With an OpenRouter key set, a call that omits
+`model=` goes to OpenRouter and uses [`openrouter.default_model`](#openrouterdefault_model), so
+this field is not used. See [Choosing a model](#choosing-a-model).
 
 ---
 
@@ -174,7 +179,9 @@ what Gemini can read.
 (`adc`, `env`, `keychain`) the setting and any `web=true` are accepted but dropped: the call runs
 without web access, keeps its normal file tools (including `write_file` where the tool has it),
 and the reply starts with a `[sidekick notice]` saying the answer is not web-grounded. Tool
-descriptions on Agent Platform say web access is unavailable.
+descriptions on Agent Platform say web access is unavailable. OpenRouter models have no web
+access either: a call they answer ignores this setting, and `web=true` is dropped with the same
+notice.
 
 ---
 
@@ -183,10 +190,11 @@ descriptions on Agent Platform say web access is unavailable.
 **Type:** boolean
 **Default:** `true`
 
-Master switch for Gemini's repository access (`list_dir`, `glob`, `grep`, `read_file`,
-`write_file`). `false` declares no file tools to Gemini at all, so you must paste any code you want
+Master switch for repository access (`list_dir`, `glob`, `grep`, `read_file`, `write_file`), for
+Gemini and for OpenRouter models that support tool calling. `false` declares no file tools to any
+model, and OpenRouter never asks about repository access, so you must paste any code you want
 considered into the call. Web access (`web_tools`) is separate and unaffected. Artifacts are
-unaffected too (they are written by the bridge, not by Gemini).
+unaffected too (they are written by the bridge, not by the model).
 
 File tools are also switched off automatically when Claude Code is launched from your home
 directory, the filesystem root, or any directory containing your home directory — a sandbox
@@ -199,7 +207,7 @@ rooted there would expose `~/.ssh`, cloud credentials, and shell history.
 **Type:** list of glob patterns
 **Default:** `[".git/**", ".env", ".env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx", "**/id_rsa*", "**/id_dsa*", "**/id_ecdsa*", "**/id_ed25519*", "**/*credentials*.json", "**/*-sa-key.json", ".ssh/**", ".aws/**", ".gnupg/**", ".netrc", ".npmrc", ".pypirc"]`
 
-Paths Gemini can never read, list, search, or write, even inside the project root. Matched
+Paths no model can ever read, list, search, or write, even inside the project root. Matched
 case-insensitively **at any depth**: a pattern without `/` matches a file or directory name
 anywhere; `dir/**` covers any directory named `dir` and everything in it (so `.git/**` also
 covers a nested `vendor/lib/.git/`).
@@ -295,7 +303,8 @@ Gemini.
 **Example:** `"deepseek/deepseek-v4.1-flash-1017"`
 
 The model used when a call passes no `model=` and an OpenRouter key is set. Unset means the
-current free default from OpenRouter's catalog. `/sidekick:setup` writes it.
+current free default from OpenRouter's catalog; with file tools on, a free model that supports
+tool calling is preferred. `/sidekick:setup` writes it, and its "Free model" choice clears it.
 
 ---
 
@@ -315,6 +324,10 @@ run and the paid model is still refused. An unlisted free model is sent only if 
 goes out with deny routing, without file tools, and a notice. The full flow:
 [first-use-acceptance](diagrams/first-use-acceptance.mermaid). To accept a model ahead of time:
 `sidekick-setup openrouter --accept '<id>'`.
+
+`list_models check=<id>` on a paid model not listed here also asks first, since the check is
+billed. Declining, or a client that can't ask, sends nothing. Saying yes to the check does not
+add the id here.
 
 ---
 
@@ -408,8 +421,8 @@ apply to the Gemini side.
 - **Offline:** if the model list can't be read at startup, the pinned defaults are used —
   `gemini-3.5-flash`, fallback `gemini-3.1-flash-lite`, Pro `gemini-3.1-pro-preview` — and a
   warning is logged.
-- **Visibility:** the startup log line names `default_model` and `fallback_model` as concrete ids
-  plus the resolved `flash=… flash-lite=… pro=…`; artifacts record the concrete model
+- **Visibility:** the startup log has `latest models: flash=…, flash-lite=…, pro=…` and a
+  `starting — primary=… default_model=… gemini=…` line with the concrete default; artifacts record the concrete model
   (transcripts don't record it). `list_models` marks `(default)` and `(latest <family>)`.
 
 ### Thinking levels per model

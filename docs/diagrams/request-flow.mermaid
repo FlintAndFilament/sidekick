@@ -6,6 +6,14 @@ sequenceDiagram
 
     CC->>S: review(content, model?, thinking?, web?, session_name?, write_artifact?)
     Note over S: resolve model (alias → newest release)<br/>pick tools: repo reads, + write_file unless web=true,<br/>+ google_search / url_context if web=true
+    opt first call with a Gemini API key (#142)
+        S->>CC: elicitation: Google may use prompts if the key's project has no billing
+        alt accepted (remembered in config.json)
+            CC-->>S: accept
+        else declined, cancelled, or Claude Code can't be asked
+            S-->>CC: "[sidekick] Not sent: ..." (nothing sent)
+        end
+    end
     loop until Gemini answers (tool budget capped)
         S->>G: session history + prompt + tool declarations
         G-->>S: function call (read_file, grep, write_file…)

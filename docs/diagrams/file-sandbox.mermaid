@@ -4,7 +4,10 @@ flowchart TD
     K -->|no| REG["registry per tool: list_dir, glob, grep, read_file<br/>+ write_file only for brainstorm / review / architect"]
     REG --> TS{"Gemini, or an OpenRouter model<br/>whose catalog lists tools?"}
     TS -->|"no (OpenRouter without tools)"| CONV[conversation only:<br/>no tools sent, reply carries a notice]
-    TS -->|yes| CALL["model requests a file-tool call<br/>(Gemini functionCall, or OpenRouter tool_calls)"]
+    TS -->|"OpenRouter with tools"| RA{"repository access allowed for this model?<br/>(asked once, saved in openrouter.repo_access_models)"}
+    RA -->|"no: declined, or sidekick can't ask"| CONV
+    RA -->|yes| CALL
+    TS -->|Gemini| CALL["model requests a file-tool call<br/>(Gemini functionCall, or OpenRouter tool_calls)"]
     CALL --> W{write_file?}
     W -->|no| R["resolve(path): reject empty / NUL;<br/>normpath, must stay inside root"]
     R --> D1{"requested path or an ancestor denied?<br/>then follow symlinks: resolved path<br/>outside root or denied?"}

@@ -1,26 +1,28 @@
 flowchart TD
-    ENV["plugin options → env<br/>SIDEKICK_API_KEY, SIDEKICK_SA_FILE"] -.->|"config.plugin_option()"| CFG
-    LOG["_configure_logging()<br/>daily file + stderr"] --> CFG["load_config()<br/>no file needed if plugin key set"]
-    CFG -->|ok| AUTH["build_auth(config.auth)<br/>plugin option first, then shell env"]
+    ENV["plugin options → env<br/>SIDEKICK_API_KEY, SIDEKICK_SA_FILE, SIDEKICK_OPENROUTER_KEY"] -.->|"config.plugin_option()"| CFG
+    MAIN["main()<br/>importing __main__ writes nothing"] --> LOG["_configure_logging()<br/>daily file + stderr"]
+    LOG --> CFG["_start(): load_config()<br/>no file needed if a plugin key is set"]
+    CFG -->|ok| GQ{"gemini_configured()?<br/>false only with an OpenRouter key<br/>and no saved auth.method or project"}
+    GQ -->|no| ROOT
+    GQ -->|yes| AUTH["build_auth(config.auth)<br/>plugin option first, then shell env"]
     ENV -.-> AUTH
-    AUTH -->|ok| CL["GeminiClient(config, credentials, api_key)"]
-    ENV -.->|"SIDEKICK_OPENROUTER_KEY"| ORK{"OpenRouter key set?"}
-    CL --> ORK
-    ORK -->|yes| RT["Router(OpenRouterClient + Gemini)"]
-    AUTH -->|"AuthError + key present"| ORO["OpenRouter only<br/>WARNING logged: Gemini backend unavailable"]
-    ORO --> RT
-    RT --> ROOT
-    ORK -->|no| LAT
+    AUTH -->|ok| CL["GeminiClient(config, credentials, api_key)<br/>API key: asks the data-use question on first call"]
     CL --> LAT["client.refresh_latest()<br/>pinned ids if models.list fails"]
+    AUTH -->|"AuthError + OpenRouter key"| ORO["no Gemini backend<br/>WARNING: Gemini backend unavailable"]
     LAT --> ROOT["project_root()<br/>CLAUDE_PROJECT_DIR, else cwd"]
-    ROOT --> TR["TranscriptWriter(dir, startup, base=root)"]
-    TR -->|ok| WS["build_workspace(config, root)"]
-    WS -->|ok| SRV["build_server(client, transcript, workspace)"]
+    ORO --> ROOT
+    ROOT --> WS["build_workspace(config, root)"]
+    WS -->|ok| ORK{"OpenRouter key set?"}
+    ORK -->|yes| RT["OpenRouterClient + refresh_catalog()<br/>Router(OpenRouter, Gemini or None)"]
+    ORK -->|no| GC["GeminiClient is the ModelSource"]
+    RT --> TR["TranscriptWriter(dir, startup, base=root)"]
+    GC --> TR
+    TR -->|ok| SRV["build_server(source, transcript, workspace)"]
     SRV --> RUN["server.run()<br/>outside the safety net"]
 
     CFG -->|ConfigError| SETUP
-    AUTH -->|AuthError| SETUP
-    TR -->|TranscriptError| SETUP
+    AUTH -->|"AuthError, no OpenRouter key"| SETUP
     WS -->|"SandboxError (artifacts_dir)"| SETUP
+    TR -->|TranscriptError| SETUP
     ANY["any other exception in _start()<br/>main() last resort: type name only"] --> SETUP
     SETUP["build_setup_server(problem)<br/>instructions = problem text"] --> ST["only tool: setup_status"]

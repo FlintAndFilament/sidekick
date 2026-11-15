@@ -11,10 +11,11 @@ the server is restarted; see [auth.md](auth.md#change-settings--reconnect).
 
 The five generating tools share four optional parameters:
 - `thinking: "none" | "low" | "medium" | "high"` — reasoning depth; omit to use `default_thinking`
-  in config. If a model rejects a level, the bridge steps up to the next one it accepts and
-  remembers that for the rest of the process.
+  in config. If a model rejects a level, the bridge steps up to the next one it accepts. On
+  Gemini it learns this from the error and remembers it for the rest of the process; on
+  OpenRouter it reads the accepted levels from the catalog.
 - `session_name: str` — which conversation to continue (default `"default"`). Calls sharing a
-  name continue one Gemini conversation; a new name starts fresh. Sessions are separate per
+  name continue one conversation; a new name starts fresh. Sessions are separate per
   tool and per model, live in memory until the server restarts, and the least recently used is
   dropped past 50. [`list_sessions`](#list_sessions) shows the live ones. There is no reset
   tool: a new name is the reset. **After a `web=true` call, use a new name before asking for writes** — see
@@ -22,13 +23,17 @@ The five generating tools share four optional parameters:
   parameter's own description only on the three `write_file` tools, and only while file tools
   are on.
 - `web: bool` — let Gemini search the web and fetch URLs for this call; omit to use
-  `web_tools.enabled`. **While web access is on, `write_file` is withheld** — see
-  [Web access](#web-access).
-- `model: str` — `flash` / `flash-lite` / `pro` (or Google's `gemini-flash-latest`,
+  `web_tools.enabled`. Gemini models only: on OpenRouter it is ignored with a notice. **While
+  web access is on, `write_file` is withheld** — see [Web access](#web-access).
+- `model: str` — an OpenRouter id (`<vendor>/<model>`, from `list_models`) when an OpenRouter
+  key is set, or `flash` / `flash-lite` / `pro` (or Google's `gemini-flash-latest`,
   `gemini-flash-lite-latest`, `gemini-pro-latest`) for the newest release of a family, or any
-  Gemini model id; omit for the server default (config `default_model`, else the newest Flash
-  resolved at startup). The parameter's description is **backend-aware**: it names the concrete
-  id each alias resolved to, the recommended ids for your active backend, and the default.
+  Gemini model id. Gemini names run on Gemini when it is configured, otherwise as
+  `google/<id>` on OpenRouter. Omit for the server default: with an OpenRouter key,
+  `openrouter.default_model` or the live free default; on Gemini alone, config `default_model`,
+  else the newest Flash resolved at startup. The parameter's description is
+  **backend-aware**: it names the default and example ids for your active backend (on Gemini,
+  the concrete id each alias resolved to).
   Sessions are keyed by tool + `session_name` + resolved model, so switching model starts a
   fresh session. Call [`list_models`](#list_models) to discover valid values, and
   see [configuration.md](configuration.md#choosing-a-model) for the recommended set and fallback
@@ -36,6 +41,17 @@ The five generating tools share four optional parameters:
 
 Every generating call appends an entry to the session transcript — see
 [transcripts.md](transcripts.md).
+
+**Asked first (#141, #142).** Some calls need your yes before anything is sent. sidekick asks
+through MCP elicitation, a question the client shows you; a notice in the reply text never
+counts as consent. It asks:
+- with a Gemini API key, once per install, that Google may use prompts and responses if the
+  key's Cloud project has no billing. Declining sends nothing and asks again next call; if
+  sidekick can't ask, the call is refused. Accepting is remembered in
+  [`gemini_data_use_accepted`](configuration.md#gemini_data_use_accepted). ADC / Agent
+  Platform never asks.
+- on an OpenRouter model's first use, its price and privacy, and separately whether it may read
+  the repository. See [OpenRouter models](#openrouter-models).
 
 ---
 
@@ -125,7 +141,7 @@ workspace at registration, so none can drift from the capability actually wired 
   generating tools, because every one of them appends to the transcript, and true on
   `list_models`, `list_sessions` and `help`, which write nothing — a client that gates
   auto-approval on annotations would otherwise prompt for the harmless calls and wave the rest
-  through. `openWorldHint` is true on every tool that reaches the Gemini API (all but
+  through. `openWorldHint` is true on every tool that reaches a model API (all but
   `list_sessions` and `help`).
 
 Every advertised value is read from whatever enforces it, never restated: the capability rows
@@ -151,7 +167,7 @@ file starts with a header naming the tool, model, session, and time, followed by
 (including any sources footer). The reply ends with `[sidekick] artifact saved: <path>`,
 relative to the repo root. If saving fails you still get the answer, plus a
 `[sidekick notice] artifact not saved: …` line. Artifacts are written by the bridge, not
-by Gemini, so they are saved even when file tools are off.
+by the model, so they are saved even when file tools are off.
 
 ---
 
@@ -289,8 +305,8 @@ Claude session to do exactly that.
 | `prompt` | string | required | The question or request |
 | `thinking` | string | config `default_thinking` | Reasoning depth |
 | `session_name` | string | `"default"` | Conversation to continue |
-| `model` | string | server default (newest Flash) | `flash` / `flash-lite` / `pro` or a model id |
-| `web` | bool | config `web_tools.enabled` | Let Gemini search the web and fetch URLs |
+| `model` | string | server default | An OpenRouter id, `flash` / `flash-lite` / `pro`, or a Gemini model id |
+| `web` | bool | config `web_tools.enabled` | Let Gemini search the web and fetch URLs (ignored on OpenRouter) |
 
 **When to use:**
 - Direct questions with clear answers
@@ -320,8 +336,8 @@ ask(prompt="What's the difference between asyncio.gather and asyncio.wait?")
 | `context` | string | `""` | What Claude is currently doing or has considered |
 | `thinking` | string | config `default_thinking` | Reasoning depth |
 | `session_name` | string | `"default"` | Conversation to continue |
-| `model` | string | server default (newest Flash) | `flash` / `flash-lite` / `pro` or a model id |
-| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call |
+| `model` | string | server default | An OpenRouter id, `flash` / `flash-lite` / `pro`, or a Gemini model id |
+| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call (ignored on OpenRouter) |
 | `write_artifact` | bool | `false` | Save the ideas to `artifacts_dir` |
 
 **When to use:**
@@ -351,12 +367,12 @@ brainstorm(
 **Parameters:**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `content` | string | required | Code, design, or plan to review — or the paths Gemini should read |
+| `content` | string | required | Code, design, or plan to review — or the paths the model should read |
 | `question` | string | `""` | Specific question to focus the review |
 | `thinking` | string | config `default_thinking` | Reasoning depth |
 | `session_name` | string | `"default"` | Conversation to continue |
-| `model` | string | server default (newest Flash) | `flash` / `flash-lite` / `pro` or a model id |
-| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call |
+| `model` | string | server default | An OpenRouter id, `flash` / `flash-lite` / `pro`, or a Gemini model id |
+| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call (ignored on OpenRouter) |
 | `write_artifact` | bool | `true` | Save the answer to `artifacts_dir` |
 
 **When to use:**
@@ -390,8 +406,8 @@ review(
 | `context` | string | `""` | Relevant code, recent changes, environment details |
 | `thinking` | string | config `default_thinking` | Reasoning depth (use `high` for complex failures) |
 | `session_name` | string | `"default"` | Conversation to continue |
-| `model` | string | server default (newest Flash) | `flash` / `flash-lite` / `pro` or a model id |
-| `web` | bool | config `web_tools.enabled` | Let Gemini search the web and fetch URLs |
+| `model` | string | server default | An OpenRouter id, `flash` / `flash-lite` / `pro`, or a Gemini model id |
+| `web` | bool | config `web_tools.enabled` | Let Gemini search the web and fetch URLs (ignored on OpenRouter) |
 
 **When to use:**
 - Unexplained test failures
@@ -425,8 +441,8 @@ debug(
 | `question` | string | `""` | Specific architecture question or concern |
 | `thinking` | string | config `default_thinking` | Reasoning depth (use `high` for complex systems) |
 | `session_name` | string | `"default"` | Conversation to continue |
-| `model` | string | server default (newest Flash) | `flash` / `flash-lite` / `pro` or a model id |
-| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call |
+| `model` | string | server default | An OpenRouter id, `flash` / `flash-lite` / `pro`, or a Gemini model id |
+| `web` | bool | config `web_tools.enabled` | Let Gemini search the web; withholds `write_file` for the call (ignored on OpenRouter) |
 | `write_artifact` | bool | `true` | Save the answer to `artifacts_dir` |
 
 **When to use:**
@@ -446,19 +462,23 @@ architect(
 
 ## list_models
 
-**Purpose:** Discovery utility — lists the Gemini models available on the bridge's active
-backend, so Claude (or you) can pick a valid value for the `model=` parameter. This is a
-metadata call, not an inference: it has no `thinking` or `session_name` parameter, writes
-nothing, and is not recorded in the transcript.
+**Purpose:** Discovery utility — lists the models on each configured backend (OpenRouter
+first, then Gemini), so Claude (or you) can pick a valid value for the `model=` parameter.
+This is a metadata call, not an inference: it has no `thinking` or `session_name` parameter,
+writes nothing, and is not recorded in the transcript. Only `check` sends a request to a model.
 
 **Parameters:**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `refresh` | bool | `false` | Re-fetch the live list, bypassing the per-process cache |
-| `query` | string | none | OpenRouter only: search model ids and names (case-insensitive) |
-| `check` | string | none | OpenRouter only: one model id; shows its price and privacy status (sends one tiny routing check; a paid model you have not accepted asks first, and is not checked if sidekick can't ask) |
+| `refresh` | bool | `false` | Re-fetch the live lists: bypasses the per-process Gemini cache and reloads the OpenRouter catalog |
+| `query` | string | none | OpenRouter only: search model ids and names (case-insensitive); shows up to 40 matches |
+| `check` | string | none | OpenRouter only: one model id; shows its price and privacy status (sends one tiny routing check; a paid model you have not accepted asks first, and is not checked if you decline or sidekick can't ask) |
 
-**Behavior:**
+Without an OpenRouter key, `query` and `check` add a notice that they apply to OpenRouter
+only. If the OpenRouter catalog can't be loaded, that section is a notice naming the default
+model instead of a list.
+
+**Behavior (Gemini section):**
 - Fetches the live catalog via the backend's `models.list`, then keeps only models the bridge
   can actually run — an **allowlist**: Gemini chat generations from `gemini-2` up (`gemini-2*`,
   `gemini-3*`, and any later major version, dotted or hyphenated) plus `-latest` aliases.
@@ -496,13 +516,17 @@ tokens, input / output, live from OpenRouter with no markup:
 ```
 OpenRouter models (USD per 1M tokens, input / output, from the live catalog):
 
-  <id>   $<input> / $<output>   (default)
-  <free-id>:free   free   (free default)
+  <id>             $<input> / $<output>  <context> ctx  privacy: not checked  (default)  (<name>)
+  <free-id>:free   free  <context> ctx  privacy: some providers may store/train  (free default)  (<name>)
   ...
 
-N more text models: pass query='...' to search ids and names, or check='<id>' for one model's
+N more text models: pass query='…' to search ids and names, or check='<id>' for one model's
 price and privacy status (sends one tiny routing check).
 ```
+Each row shows the id, price, context length, the privacy status once known (`not checked`
+until then), the `default` or `free default` tag, the setup pick's label if it is one, and the
+model's name. `check` prints the model's row followed by a privacy sentence, plus the free-model
+rate limits for a `:free` model.
 
 **Sample output** (api_key / Developer API backend; abridged — your live list reflects the
 current catalog):
@@ -573,7 +597,10 @@ models (`flash`, `flash-lite`, `pro`, `gemini-*`) keep web access.
 
 The first call on an OpenRouter model asks a question with its price and privacy status; see
 [first-use-acceptance](diagrams/first-use-acceptance.mermaid) and
-[configuration.md](configuration.md#openrouteraccepted_models). Free (`:free`) models allow 20
+[configuration.md](configuration.md#openrouteraccepted_models). Declining sends nothing. If
+sidekick can't ask, a paid model is refused before anything is sent, even the billed privacy
+check; a free model is sent only when some of its providers keep no data, routed to those
+providers alone, with a notice. Free (`:free`) models allow 20
 requests a minute and 50 a day (1,000 a day once you have bought at least 10 credits). On a
 terminal 429, 503 or a gated free model, the call retries once on the next free model; paid models
 never switch. Routing: [backend-routing](diagrams/backend-routing.mermaid).
@@ -582,9 +609,9 @@ never switch. Routing: [backend-routing](diagrams/backend-routing.mermaid).
 
 ## list_sessions
 
-**Purpose:** lists the Gemini conversations this server holds in memory, so Claude can find one
-to continue after a gap or a context compaction (#15). It reads process memory only: no Gemini
-call, no parameters, writes nothing, and is not recorded in the transcript.
+**Purpose:** lists the conversations this server holds in memory, on every backend, so Claude
+can find one to continue after a gap or a context compaction (#15). It reads process memory
+only: no API call, no parameters, writes nothing, and is not recorded in the transcript.
 
 **Behavior:**
 - One row per session: the tool, the `session_name`, the concrete model, and the number of
@@ -613,11 +640,11 @@ To continue one, call the same tool with that session_name (and model, if you pa
 ## help
 
 The full detail behind the short server instructions (#78): the `--help` for Claude. It writes
-nothing, makes no Gemini call, and is not recorded in the transcript.
+nothing, makes no API call, and is not recorded in the transcript.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `topic` | string | all topics | `tools`, `files`, `web`, `sessions`, `disk`, or a generating tool's name (e.g. `review`) |
+| `topic` | string | all topics | `tools`, `files`, `web`, `sessions`, `disk`, `models`, or a generating tool's name (e.g. `review`) |
 
 | Topic | Contents |
 |---|---|
@@ -626,7 +653,8 @@ nothing, makes no Gemini call, and is not recorded in the transcript.
 | `web` | Web default, when to pass `web=true`, the untrusted-content rule, and the `write_file` exclusion with the new-`session_name` advice |
 | `sessions` | The `session_name` contract, and a pointer to `list_sessions` |
 | `disk` | Everything that reaches disk: the transcript path and which tools save artifacts where |
-| `<tool>` | That tool's full description, as its MCP description states it |
+| `models` | Which ids go to which backend, the default model, and the Gemini API-key data-use question; with an OpenRouter key, also live prices, the first-use question, `block_data_collection` and free-model limits |
+| `<tool>` | That tool's one-line purpose plus its repository, disk and web rows |
 
 Every topic is built from the live configuration, the same way the instructions are, so it
 always matches what the server actually does. Topic names are case-insensitive; an unknown

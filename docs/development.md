@@ -26,12 +26,13 @@ extras, so it uninstalls pytest, ruff and the rest. If the tests suddenly can't 
 
 Run pytest for the current count.
 
-`tests/conftest.py` scrubs `SIDEKICK_OPENROUTER_KEY` and `OPENROUTER_API_KEY` so a key in your
-shell cannot leak into a test. OpenRouter tests use `tests/_openrouter_fixtures.py` (an httpx
+`tests/conftest.py` scrubs `SIDEKICK_API_KEY`, `SIDEKICK_SA_FILE`, `SIDEKICK_OPENROUTER_KEY` and
+`OPENROUTER_API_KEY` so a key in your shell cannot leak into a test, and points the log directory
+at a temp dir so no test writes `~/.config/sidekick/logs/` (#136, #144). OpenRouter tests use `tests/_openrouter_fixtures.py` (an httpx
 `MockTransport`, no network).
 
 Every test is mocked: no network calls, and the suite runs
-in about 3 seconds.
+in about 4 seconds.
 
 ## Running the plugin locally
 
@@ -69,13 +70,15 @@ parses free text as shell, JSON or Python. You can run it yourself:
 ```
 
 `write` merges into the existing `config.json` and writes atomically. Only a file it can't read
-as JSON is replaced, after a timestamped `.bak` copy. `--config PATH` points either command at another file. `write --help` lists
-the fields.
+as JSON is replaced, after a timestamped `.bak` copy. `--config PATH` points a command at another file. `write --help` lists
+the fields. `openrouter` saves the OpenRouter choices and `keychain-store` puts a service-account
+key in the macOS keychain.
 
 ### Trying setup mode locally
 
 Setup mode is what users see when config or auth is broken. To reach it without touching your
-real config, use a throwaway `HOME`, an `api_key` config and no key:
+real config, use a throwaway `HOME`, an `api_key` config and no key. Unset the OpenRouter keys
+too: with one set, a Gemini auth failure serves OpenRouter only instead of setup mode.
 
 ```bash
 (
@@ -85,7 +88,8 @@ real config, use a throwaway `HOME`, an `api_key` config and no key:
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-    | env -u SIDEKICK_API_KEY -u GEMINI_API_KEY .venv/bin/sidekick
+    | env -u SIDEKICK_API_KEY -u GEMINI_API_KEY -u SIDEKICK_OPENROUTER_KEY -u OPENROUTER_API_KEY \
+        .venv/bin/sidekick
 )
 ```
 
@@ -115,13 +119,15 @@ Set `SIDEKICK_LOG_LEVEL=DEBUG` before starting Claude Code for per-call detail. 
 # Security scan
 .venv/bin/bandit -c pyproject.toml -r src
 
-# All pre-commit hooks
-.venv/bin/pre-commit run --all-files
+# All pre-commit hooks (pre-commit is the uv tool installed above, not in .venv)
+pre-commit run --all-files
 ```
 
 `ruff check src tests` and `ruff format --check src tests` are clean. The pre-commit ruff
-rev matches the ruff in `uv.lock`; bump both together. `mypy src` reports 2 long-standing
-errors in `auth.py` (`from_service_account_info` is untyped).
+rev matches the ruff in `uv.lock`; bump both together. `mypy src` is clean. `bandit -c
+pyproject.toml -r src` lists 11 low-severity findings (subprocess calls in `auth.py` and
+`setup_cli.py`, `random` for retry jitter) and exits 1; add `-ll` to see only medium and above,
+which is clean.
 
 Before a promotion to `main`, also run:
 

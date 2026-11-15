@@ -1,20 +1,22 @@
 graph TD
     ENV["plugin env<br/>SIDEKICK_OPENROUTER_KEY / SIDEKICK_API_KEY / SIDEKICK_SA_FILE"] -->|"plugin_option()"| CFG
-    M["__main__.py"] --> CFG["load_config()<br/>config.py"]
+    M["__main__.py<br/>main(): logging first"] --> CFG["load_config()<br/>config.py"]
     M --> AUTH["build_auth()<br/>auth.py"]
-    M --> CL["GeminiClient(config, credentials, api_key)<br/>+ refresh_latest()<br/>client.py"]
+    M --> CL["GeminiClient(config, credentials, api_key)<br/>+ refresh_latest()<br/>only when Gemini is configured<br/>client.py"]
     M --> BK["backends.py<br/>Backend / ModelSource / Surface"]
     M --> ROUTER["router.py Router<br/>only when an OpenRouter key is set"]
     ROUTER --> CL
     ROUTER --> ORC["openrouter.py OpenRouterClient"]
     ORC --> CAT["openrouter_catalog.py<br/>live prices, privacy, free default"]
+    ORC --> OLOOP["openai_tool_loop.py<br/>run_openai_tool_loop()"]
+    OLOOP --> LOOP
     CL -.-> BK
     ORC -.-> BK
     M --> ROOT["project_root()<br/>workspace.py"]
     ROOT --> TR["TranscriptWriter(dir, startup, base=root)<br/>transcript.py"]
     ROOT --> WS["build_workspace(config, root)<br/>workspace.py"]
-    M --> SRV["build_server(client, transcript, workspace)<br/>server.py"]
-    M -. "any startup failure" .-> SETUP["build_setup_server(problem)<br/>server.py: setup_status only"]
+    M --> SRV["build_server(source, transcript, workspace)<br/>server.py"]
+    M -. "a startup failure" .-> SETUP["build_setup_server(problem)<br/>server.py: setup_status only"]
 
     CFG --> JSON["~/.config/sidekick/config.json<br/>optional with the plugin key"]
     ENV --> AUTH
@@ -36,7 +38,7 @@ graph TD
     MCP --> T8["list_sessions"]
     SRV -- "render callable" --> T7
 
-    T1 & T2 & T3 & T4 & T5 --> BASE["tools/base.py<br/>call_gemini()"]
+    T1 & T2 & T3 & T4 & T5 --> BASE["tools/base.py<br/>call_gemini(): backend_for, preflight, ask<br/>elicitor(): MCP elicitation"]
     GUIDE --> CAPS["tools CAPABILITIES<br/>+ tools/base hints"]
     BASE --> ROUTER
     BASE --> CL
@@ -45,8 +47,9 @@ graph TD
     BASE --> SRC["sources.py<br/>resolve_redirects() + sources_footer()"]
     BASE --> TR
     BASE --> WS
-    CL --> LOOP["tool_loop.py<br/>run_tool_loop()"]
+    CL --> LOOP["tool_loop.py<br/>ToolRegistry + run_tool_loop()"]
     CL --> WEB
     T6 --> CL
-    T6 & BASE & CL --> MOD["models.py<br/>shortlist / schema_hint / is_chat_capable"]
+    T6 --> ORC
+    T6 & CL --> MOD["models.py<br/>shortlist / schema_hint / is_chat_capable"]
     T8 --> CL

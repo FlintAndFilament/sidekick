@@ -1,8 +1,8 @@
 flowchart TD
-    START["call_gemini(): registry only if file tools on<br/>and backend.tools_supported(model)"] --> BK{backend?}
+    START["call_gemini(): registry only if file tools on,<br/>backend.tools_supported(model),<br/>and preflight allowed them"] --> BK{backend?}
     BK -->|Gemini| A
     BK -->|"OpenRouter, model lists tools"| OA["OpenRouterClient.ask(): body + tools (OpenAI format)<br/>+ provider.require_parameters: true"]
-    BK -->|"OpenRouter, no tools / catalog unknown"| NT["one plain request, no tools;<br/>reply prefixed: model can't read repository files"]
+    BK -->|"OpenRouter, no tools / catalog unknown,<br/>or repository access not allowed"| NT["one plain request, no tools;<br/>reply prefixed: why it saw no repository files"]
     OA --> ORND["round n of 20: POST /chat/completions<br/>(429/502/503 retried per round)"]
     ORND -->|"404 Filter by Data Policy"| OE["[sidekick] Not sent: no provider that<br/>supports tool calling (and doesn't collect data)"]
     ORND --> OTC{message.tool_calls?}
@@ -38,5 +38,5 @@ flowchart TD
     E3 --> FB
     FB{"call_gemini() catches ClientError:<br/>503/429 and not already on fallback?"}
     FB -->|"yes, but write_file already succeeded"| ERR["[sidekick error] … not retried:<br/>files were already written"]
-    FB -->|yes, no writes| RETRY["rerun whole loop once on the fallback:<br/>Gemini newest Flash-Lite; OpenRouter next free model<br/>(paid OpenRouter models never switch)"]
+    FB -->|yes, no writes| RETRY["fallback preflight, then rerun whole loop once:<br/>Gemini newest Flash-Lite; OpenRouter next free model<br/>(paid OpenRouter models never switch)"]
     FB -->|no| ERR2["[sidekick error] …"]

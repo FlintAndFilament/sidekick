@@ -131,7 +131,8 @@ GEMINI_DATA_USE_DECLINED = (
 GEMINI_DATA_USE_UNASKED = (
     "[sidekick] Not sent: sidekick couldn't ask you to accept Gemini's data-use terms here. "
     "Accept from an interactive session, or set gemini_data_use_accepted: true in "
-    "~/.config/sidekick/config.json."
+    "~/.config/sidekick/config.json — only the user should make this change (takes effect "
+    "after /reload-plugins)."
 )
 
 _NO_OPENROUTER_KEY = (

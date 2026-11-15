@@ -85,7 +85,8 @@ async def test_unattended_paid_model_is_refused_and_nothing_is_sent(tmp_path):  
     assert pre.message == (
         "[sidekick] Not sent: `x-ai/grok-4.7` is a paid model and sidekick couldn't ask you to "
         "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models in "
-        "~/.config/sidekick/config.json."
+        "~/.config/sidekick/config.json — only the user should make this change (takes effect "
+        "after /reload-plugins)."
     )
     assert fake.posts == []  # not even the billed privacy probe
     assert not (await c.preflight(GROK, None)).proceed  # still refused next time

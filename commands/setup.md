@@ -79,7 +79,9 @@ instead of a second one:
       For a free model, also show its limits line (it says free models allow
       20 requests a minute and 50 a day) and say: "Free models are often served
       by providers that store or train on prompts." Use AskUserQuestion: "Use
-      it" or "Pick another" (on "Pick another", go back to sub-step 2).
+      it" or "Pick another" (on "Pick another", go back to sub-step 2). If the
+      reply starts with `[sidekick] Not checked`, show it and go back to
+      sub-step 2.
    4. Use AskUserQuestion: "Warn me about providers that may store or train on
       prompts (Recommended)" or "Block them (block_data_collection)". If they
       block and the check said every provider may store or train on prompts,

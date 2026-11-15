@@ -401,7 +401,8 @@ def unattended_paid_refused_message(model: str) -> str:
     return (
         f"[sidekick] Not sent: `{model}` is a paid model and sidekick couldn't ask you to "
         "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models "
-        "in ~/.config/sidekick/config.json."
+        "in ~/.config/sidekick/config.json — only the user should make this change (takes "
+        "effect after /reload-plugins)."
     )
 
 

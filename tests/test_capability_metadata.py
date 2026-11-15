@@ -18,6 +18,7 @@ from mcp.types import Tool
 from sidekick.client import GeminiClient
 from sidekick.config import Config
 from sidekick.guide import help_text
+from sidekick.tools import effective_capabilities
 from sidekick.server import build_server, server_instructions
 from sidekick.tools.base import capability_hint, tool_annotations
 from sidekick.transcript import TranscriptWriter
@@ -480,8 +481,8 @@ class TestInstructionsStayWellFormed:
         from sidekick.tools.base import ToolCapability
 
         caps = (
-            ToolCapability("ask", write=False, artifacts="never"),
-            ToolCapability("review", write=True, artifacts="opt-in"),
+            ToolCapability("ask", access="read", artifacts="never"),
+            ToolCapability("review", access="write", artifacts="opt-in"),
         )
         line = self._always_writes_line(caps, tmp_path)
         assert "-  " not in line
@@ -491,7 +492,7 @@ class TestInstructionsStayWellFormed:
     def test_no_artifact_line_when_no_tool_saves_one(self, tmp_path: Path) -> None:
         from sidekick.tools.base import ToolCapability
 
-        caps = (ToolCapability("ask", write=False, artifacts="never"),)
+        caps = (ToolCapability("ask", access="read", artifacts="never"),)
         with patch("sidekick.guide.CAPABILITIES", caps):
             text = _full(_workspace(tmp_path))
         assert "Markdown artifact" not in text
@@ -602,3 +603,23 @@ class TestHelpText:
         """With file tools off there is no write to protect, so the advice would mislead."""
         text = _full(_workspace(tmp_path, enabled=False))
         assert "new session_name" not in text
+
+
+def test_defaults_match_todays_rows() -> None:
+    rows = {c.name: c.access for c in effective_capabilities({})}
+    assert rows == {
+        "ask": "read",
+        "brainstorm": "write",
+        "review": "write",
+        "debug": "read",
+        "architect": "write",
+    }
+
+
+def test_override_replaces_only_that_tool() -> None:
+    rows = {c.name: c for c in effective_capabilities({"review": "none", "ask": "write"})}
+    assert rows["review"].access == "none"
+    assert not rows["review"].read and not rows["review"].write
+    assert rows["ask"].write and rows["ask"].read
+    assert rows["architect"].access == "write"
+    assert rows["review"].artifacts == "default"  # artifacts untouched

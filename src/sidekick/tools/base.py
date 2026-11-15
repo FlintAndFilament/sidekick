@@ -42,7 +42,7 @@ from sidekick.client import (
 )
 
 _log = logging.getLogger(__name__)
-from sidekick.config import ThinkingLevel
+from sidekick.config import AccessLevel, ThinkingLevel
 from sidekick.file_tools import READ_TOOL_NAMES, WRITE_TOOL_NAME
 from sidekick.sandbox import DEFAULT_DENY, Sandbox
 from sidekick.sources import record_uris, resolve_redirects, sources_footer
@@ -123,13 +123,21 @@ class ToolCapability:
     """One tool's capability row — the single source of truth for what it may do (#74).
 
     Each tool module declares its own; server.py builds the advertised rows from the
-    collected set, so adding a tool or flipping its `write` flag updates every channel.
+    collected set, so adding a tool or changing its `access` level updates every channel.
     """
 
     name: str
-    write: bool
+    access: AccessLevel
     artifacts: ArtifactMode
     summary: str = ""  # the tool's own description, reused for "choosing a tool" (#74)
+
+    @property
+    def read(self) -> bool:
+        return self.access != "none"
+
+    @property
+    def write(self) -> bool:
+        return self.access == "write"
 
 
 def deny_note(sandbox: Sandbox) -> str:

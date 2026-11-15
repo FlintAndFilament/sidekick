@@ -54,6 +54,10 @@ PLUGIN_OPENROUTER_KEY_VAR = "SIDEKICK_OPENROUTER_KEY"
 OPENROUTER_ENV_VAR = "OPENROUTER_API_KEY"
 
 ThinkingLevel = Literal["none", "low", "medium", "high"]
+# What a tool may do with the repository: nothing, read it, or read and write (write includes
+# read). Per-tool overrides live in Config.tool_access (#132).
+AccessLevel = Literal["none", "read", "write"]
+ToolName = Literal["ask", "brainstorm", "review", "debug", "architect"]
 AuthMethod = Literal["adc", "env", "keychain", "api_key"]
 
 
@@ -141,6 +145,8 @@ class Config(BaseModel):
     artifacts_dir: str = "./sidekick-artifacts"
     file_tools: FileToolsConfig = FileToolsConfig()
     web_tools: WebToolsConfig = WebToolsConfig()
+    # Per-tool repository access overriding each tool's built-in level; absent = built-in.
+    tool_access: dict[ToolName, AccessLevel] = {}
     auth: AuthConfig = AuthConfig()
     openrouter: OpenRouterConfig = OpenRouterConfig()
     # true = the user accepted that Google may use prompts sent through an unbilled Gemini API

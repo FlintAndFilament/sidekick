@@ -466,6 +466,10 @@ def help_text(
             artifacts=cap.artifacts,
             web_default=web_default,
             web_supported=web_supported,
+            # Same row the tool's MCP description carries: describe the backend it runs on.
+            default_backend=surface.primary if surface else "gemini",
+            gemini_available=surface.gemini_available if surface else False,
+            files=surface.files if surface else False,
         )
     if topic is None:
         return "\n\n".join(sections.values())

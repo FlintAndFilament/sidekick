@@ -505,7 +505,8 @@ async def call_gemini(
         return (
             f"[sidekick notice] `{use_model}` didn't read repository files: sidekick couldn't "
             "ask you to allow it here. Allow it from an interactive session, or add the id to "
-            "openrouter.repo_access_models in ~/.config/sidekick/config.json.\n\n"
+            "openrouter.repo_access_models in ~/.config/sidekick/config.json — only the user should "
+            "make this change (takes effect after /reload-plugins).\n\n"
         )
 
     records: list[ToolCallRecord] = []

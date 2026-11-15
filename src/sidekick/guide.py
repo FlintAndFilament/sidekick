@@ -407,7 +407,8 @@ def _tools_topic() -> str:
 
 _GEMINI_UNPAID = (
     "Gemini: if a Gemini API key's Cloud project has no billing (the unpaid tier), Google may "
-    "use prompts and responses to improve its products."
+    "use prompts and responses to improve its products. sidekick asks once before the first "
+    "API-key call and sends nothing until you accept."
 )
 
 _GEMINI_MODELS_TOPIC = (

@@ -273,6 +273,10 @@ class OpenRouterClient:
     def entry(self, model_id: str) -> Optional[ORModel]:
         return next((m for m in self._catalog if m.id == model_id), None)
 
+    def is_accepted(self, model_id: str) -> bool:
+        """True when `model_id` is already accepted (or notified): its billing needs no new ask."""
+        return model_id in self._accepted or model_id in self._notified
+
     def tools_supported(self, model: str) -> bool:
         """True when file tools are on and the catalog says `model` accepts tool definitions."""
         if not self._config.file_tools.enabled:
@@ -347,7 +351,7 @@ class OpenRouterClient:
 
         `tools` in the result is True only when the user has let `model` read repository files;
         `tools_reason` says why not when the call wanted them."""
-        if model in self._accepted or model in self._notified:
+        if self.is_accepted(model):
             return await self._with_repo_consent(model, elicit, want_tools)
         if elicit is None and not is_free(model):  # even the probe is billed: send nothing (#141)
             return Preflight(False, message=unattended_paid_refused_message(model))

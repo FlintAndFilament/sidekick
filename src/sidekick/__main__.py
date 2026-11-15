@@ -190,7 +190,7 @@ def _start() -> "Optional[FastMCP]":
                 config,
                 credentials=auth_result.credentials,
                 api_key=auth_result.api_key,
-                unpaid_tier_notice=auth_result.api_key is not None,
+                needs_data_use_consent=auth_result.api_key is not None,
             )
             latest = gemini.refresh_latest()  # one models.list call; pinned defaults if it fails
             _log.info(

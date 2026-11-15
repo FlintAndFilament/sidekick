@@ -174,7 +174,11 @@ switch from an Agent Platform method, the old values stay in the file, unused.
   [tools.md](tools.md#web-access)
 
 **Unpaid tier:** if the key's Cloud project has no billing, Google may use your prompts and
-responses to improve its products. `block_data_collection` does not apply to Gemini.
+responses, including any code sent with them, to improve its products. `block_data_collection`
+does not apply to Gemini. Before the first Gemini call, sidekick asks you to accept this once and
+sends nothing until you do; the answer is remembered as
+[`gemini_data_use_accepted`](configuration.md#gemini_data_use_accepted). Where sidekick can't
+ask, the call is refused with nothing sent.
 
 **Quota:** AI Studio rate limits depend on the model and on whether billing is enabled for the
 key; check the current limits in AI Studio. Limits are generally lower than on Agent Platform.

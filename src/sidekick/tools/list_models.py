@@ -24,12 +24,12 @@ Imports:  models.py (filter + shortlist), client.py (GeminiClient, ClientError),
 import asyncio
 from typing import Annotated, Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from sidekick import models
-from sidekick.backends import ModelSource
+from sidekick.backends import Elicit, ModelSource
 from sidekick.client import ClientError, GeminiClient
 from sidekick.openrouter import OpenRouterClient
 from sidekick.openrouter_catalog import (
@@ -37,13 +37,17 @@ from sidekick.openrouter_catalog import (
     PINNED_FREE_MODEL,
     ORModel,
     PrivacyStatus,
+    check_declined_message,
+    check_question,
+    check_unaskable_message,
     featured,
     format_rows,
     free_candidates,
+    is_free,
     privacy_sentence,
     search,
 )
-from sidekick.tools.base import ToolResult
+from sidekick.tools.base import ToolResult, elicitor
 from sidekick.transcript import TranscriptWriter
 
 _TOOL_NAME = "list_models"
@@ -184,7 +188,11 @@ def _rows(client: OpenRouterClient, rows: list[ORModel]) -> list[str]:
 
 
 async def render_openrouter(
-    client: OpenRouterClient, *, query: Optional[str], check: Optional[str]
+    client: OpenRouterClient,
+    *,
+    query: Optional[str],
+    check: Optional[str],
+    elicit: Optional[Elicit] = None,
 ) -> str:
     """The OpenRouter section: a check of one model, a search, or the featured list."""
     if not client.catalog_loaded:
@@ -199,6 +207,15 @@ async def render_openrouter(
                 f"[sidekick notice] `{check}` is not in OpenRouter's catalog. "
                 "Check the id, or search with query=."
             )
+        if not is_free(check) and not client.is_accepted(check):
+            # The probe is a billed request to a model the user has not accepted (#142).
+            if elicit is None:
+                return check_unaskable_message(check)
+            outcome = await elicit(check_question(check, found))
+            if outcome == "unavailable":
+                return check_unaskable_message(check)
+            if outcome != "accept":
+                return check_declined_message(check)
         try:
             status = await client.privacy_status(check)
         except ClientError as exc:
@@ -266,6 +283,7 @@ def register(mcp: FastMCP, client: ModelSource, transcript: TranscriptWriter) ->
         )
     )
     async def list_models(
+        ctx: Context,  # type: ignore[type-arg]
         refresh: Annotated[
             bool,
             Field(
@@ -285,7 +303,7 @@ def register(mcp: FastMCP, client: ModelSource, transcript: TranscriptWriter) ->
             Optional[str],
             Field(
                 description="OpenRouter only: one model id to show its price and privacy status. "
-                "Sends one tiny routing check."
+                "Sends one tiny routing check; paid models ask first."
             ),
         ] = None,
     ) -> ToolResult:
@@ -299,7 +317,9 @@ def register(mcp: FastMCP, client: ModelSource, transcript: TranscriptWriter) ->
         if openrouter is not None:
             if refresh:
                 await asyncio.to_thread(openrouter.refresh_catalog)
-            sections.append(await render_openrouter(openrouter, query=query, check=check))
+            sections.append(
+                await render_openrouter(openrouter, query=query, check=check, elicit=elicitor(ctx))
+            )
         if gemini is not None:
             sections.append(gemini_section(refresh))
         if not sections:

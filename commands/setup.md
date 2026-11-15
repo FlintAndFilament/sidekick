@@ -107,8 +107,9 @@ instead of a second one:
    a prompt; it just closes. The key shows masked except its last few
    characters. Press Enter to save. It is stored in your keychain. Get a key
    at https://aistudio.google.com/apikey. If this key's Cloud project
-   has no billing, Google may use prompts and responses to improve its products
-   (block_data_collection does not apply to Gemini)." Then use
+   has no billing, Google may use prompts and responses, including any code sent with
+   them, to improve its products (block_data_collection does not apply to Gemini).
+   sidekick asks once before the first call." Then use
    AskUserQuestion: "Done" or "I need a key first". Write `--auth-method 'api_key' --key-source 'plugin'`.
    To change or replace the key later, the user repeats the same steps; see
    docs/auth.md, "Change settings & reconnect".
@@ -117,8 +118,9 @@ instead of a second one:
    `values.api_key_env`, normally `GEMINI_API_KEY`). Say plainly that the
    variable must be set in the environment Claude Code is started from, and
    that path A avoids that. Tell the user: if this key's Cloud project has no
-   billing, Google may use prompts and responses to improve its products
-   (block_data_collection does not apply to Gemini). Write `--auth-method 'api_key' --api-key-env '…'`.
+   billing, Google may use prompts and responses, including any code sent with them,
+   to improve its products (block_data_collection does not apply to Gemini); sidekick
+   asks once before the first call. Write `--auth-method 'api_key' --api-key-env '…'`.
    If the user has also filled the plugin's key option, that option wins.
 
    **C. Agent Platform.** Ask how to sign in, from `auth_methods` only:

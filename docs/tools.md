@@ -456,7 +456,7 @@ nothing, and is not recorded in the transcript.
 |---|---|---|---|
 | `refresh` | bool | `false` | Re-fetch the live list, bypassing the per-process cache |
 | `query` | string | none | OpenRouter only: search model ids and names (case-insensitive) |
-| `check` | string | none | OpenRouter only: one model id; shows its price and privacy status (sends one tiny routing check) |
+| `check` | string | none | OpenRouter only: one model id; shows its price and privacy status (sends one tiny routing check; a paid model you have not accepted asks first, and is not checked if sidekick can't ask) |
 
 **Behavior:**
 - Fetches the live catalog via the backend's `models.list`, then keeps only models the bridge

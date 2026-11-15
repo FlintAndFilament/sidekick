@@ -401,7 +401,8 @@ def unattended_paid_refused_message(model: str) -> str:
     return (
         f"[sidekick] Not sent: `{model}` is a paid model and sidekick couldn't ask you to "
         "accept its price here. Run /sidekick:setup, or add it to openrouter.accepted_models "
-        "in ~/.config/sidekick/config.json."
+        "in ~/.config/sidekick/config.json — only the user should make this change (takes "
+        "effect after /reload-plugins)."
     )
 
 
@@ -417,4 +418,25 @@ def dismissed_message(model_id: str) -> str:
         f"[sidekick] Not sent: the question about `{model_id}` was dismissed, so nothing went "
         "to OpenRouter. To use this model without being asked (for example in a non-interactive "
         "session), accept it once in /sidekick:setup."
+    )
+
+
+def check_question(model_id: str, entry: Optional[ORModel]) -> str:
+    """Asked before list_models check= sends a billed probe to a paid model not yet accepted."""
+    price = price_pair(entry) if entry is not None else "its catalog price"
+    return (
+        f"Check `{model_id}`'s privacy status? This sends one tiny request to it, billed at "
+        f"{price} (a fraction of a cent)."
+    )
+
+
+def check_declined_message(model_id: str) -> str:
+    return f"[sidekick] Not checked: you declined the billed check for `{model_id}`."
+
+
+def check_unaskable_message(model_id: str) -> str:
+    return (
+        f"[sidekick] Not checked: `{model_id}` is a paid model and sidekick couldn't ask "
+        "before sending a billed check. Accept the model first (use it once interactively), "
+        "or check it from an interactive session."
     )

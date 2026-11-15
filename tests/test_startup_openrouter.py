@@ -7,7 +7,7 @@ import pytest
 
 from sidekick import __main__ as entry
 from sidekick.auth import AuthError
-from sidekick.client import GEMINI_UNPAID_NOTICE, GeminiClient
+from sidekick.client import GEMINI_DATA_USE_UNASKED, GeminiClient
 from sidekick.config import Config
 from sidekick.router import Router
 from tests._fakes import FAKE_OPENROUTER_KEY
@@ -87,7 +87,7 @@ def test_without_openrouter_key_the_source_is_the_gemini_client(
     assert type(src) is GeminiClient
 
 
-async def test_api_key_mode_turns_on_the_unpaid_notice(
+async def test_api_key_mode_asks_for_gemini_data_use_consent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("SIDEKICK_OPENROUTER_KEY", raising=False)
@@ -97,4 +97,5 @@ async def test_api_key_mode_turns_on_the_unpaid_notice(
         monkeypatch, tmp_path, Config(auth={"method": "api_key"}, transcript_dir=str(tmp_path))
     )
     assert isinstance(src, GeminiClient)
-    assert (await src.preflight("gemini-3.5-flash", None)).notice == GEMINI_UNPAID_NOTICE
+    pre = await src.preflight("gemini-3.5-flash", None)
+    assert not pre.proceed and pre.message == GEMINI_DATA_USE_UNASKED

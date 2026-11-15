@@ -1,7 +1,7 @@
 # Roadmap
 
 What has shipped, what is open, and what is parked. Rebuilt from git history and GitHub issues on
-2026-11-13; everything under **Shipped** is on `main`.
+2026-11-14; everything under **Shipped** is on `main`.
 
 The `26.7.x` labels are the names the July releases went out under. Work after 26.7.4 is grouped
 by feature and issue number. From the plugin on, releases carry the plugin version
@@ -267,6 +267,22 @@ Also in `v0.5.0`:
 - Unattended (the client doesn't support elicitation, checked before anything is sent), an
   unaccepted paid model is refused before anything is sent, including the billed privacy check;
   the message says how to accept it.
+
+### Ask before Gemini data use (#142) — 0.7.2
+
+- With an API key, the first Gemini call asks you to accept that Google may use prompts and
+  responses (including code) when the key's project has no billing. Nothing is sent until you
+  accept; the answer is remembered per install as `gemini_data_use_accepted`. Declining sends
+  nothing and asks again next call; no way to ask refuses with nothing sent. This replaces the
+  one-time reply-text notice. The 503/429 fallback is covered by the same answer. Agent
+  Platform auth never asks.
+- `list_models check=<paid id>` asks before its billed privacy check unless the model is
+  already accepted; declining, or no way to ask, sends nothing.
+
+### Logging set up in main(), not at import (#144) — 0.7.2
+
+- Importing `sidekick.__main__` no longer touches the log directory; `main()` configures
+  logging. Approach from PR #137 by @bfs2021 (co-author), re-implemented on current `develop`.
 
 ---
 

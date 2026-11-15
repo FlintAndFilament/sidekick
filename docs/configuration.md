@@ -270,6 +270,24 @@ SDK explicitly, so any other key variable in your environment is not used.
 
 ---
 
+### `gemini_data_use_accepted`
+
+**Type:** boolean
+**Default:** `false`
+**Only used when:** sidekick authenticates to Gemini with an API key
+
+Records that you accepted Gemini's data-use terms: if the key's Google Cloud project has no
+billing, Google may use your prompts and responses, including any code sent with them, to
+improve its products. Before the first Gemini call with an API key, sidekick asks you once and
+sends nothing until you accept; accepting sets this field. Declining or cancelling sends nothing
+and asks again on the next call. If sidekick can't ask (the client doesn't support
+questions), the call is refused with nothing sent. To accept ahead of time, set it to `true`. If
+the config cannot be written, a yes lasts until the server restarts. Agent Platform methods
+(`adc`, `env`, `keychain`) never ask. `openrouter.block_data_collection` does not apply to
+Gemini.
+
+---
+
 ### `openrouter.default_model`
 
 **Type:** string

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from sidekick.client import GEMINI_UNPAID_NOTICE, GeminiClient
+from sidekick.client import GEMINI_DATA_USE_UNASKED, GeminiClient
 from sidekick.config import Config
 from sidekick.openrouter_catalog import REPO_ACCESS_SENTENCE, unattended_paid_refused_message
 from sidekick.router import Router
@@ -51,7 +51,8 @@ def _unasked_notice(model: str) -> str:
     return (
         f"[sidekick notice] `{model}` didn't read repository files: sidekick couldn't ask you to "
         "allow it here. Allow it from an interactive session, or add the id to "
-        "openrouter.repo_access_models in ~/.config/sidekick/config.json.\n\n"
+        "openrouter.repo_access_models in ~/.config/sidekick/config.json — only the user should "
+        "make this change (takes effect after /reload-plugins).\n\n"
     )
 
 
@@ -348,12 +349,37 @@ async def test_endlessly_rotating_default_gives_up_and_sends_nothing(tmp_path):
     assert not _transcript_written(tmp_path)
 
 
-async def test_gemini_unpaid_notice_survives_a_failed_call(tmp_path):
+async def test_gemini_api_key_without_a_way_to_ask_sends_nothing(tmp_path):
     with patch("google.genai.Client"):
-        g = GeminiClient(Config(auth={"method": "api_key"}), api_key="k", unpaid_tier_notice=True)
-    g._raw_client.aio.models.generate_content = AsyncMock(side_effect=Exception("API down"))
-    answer = await _call(g, tmp_path)
-    assert answer.startswith(GEMINI_UNPAID_NOTICE + "[sidekick error]")
+        g = GeminiClient(
+            Config(auth={"method": "api_key"}),
+            api_key="k",
+            needs_data_use_consent=True,
+            config_path=tmp_path / "config.json",
+        )
+    gen = AsyncMock(return_value=_text_response("from gemini"))
+    g._raw_client.aio.models.generate_content = gen
+    answer = await _call(g, tmp_path, elicit=elicitor(_incapable_ctx()))
+    assert answer == GEMINI_DATA_USE_UNASKED
+    gen.assert_not_called()
+    assert not _transcript_written(tmp_path)
+
+
+async def test_gemini_api_key_accept_covers_the_fallback_too(tmp_path):
+    with patch("google.genai.Client"):
+        g = GeminiClient(
+            Config(auth={"method": "api_key"}),
+            api_key="k",
+            needs_data_use_consent=True,
+            config_path=tmp_path / "config.json",
+        )
+    gen = AsyncMock(side_effect=[Exception("503 UNAVAILABLE")] * 4 + [_text_response("fb")])
+    g._raw_client.aio.models.generate_content = gen
+    elicit, asked = _asker("accept")
+    with patch("sidekick.client.asyncio.sleep", AsyncMock()):
+        answer = await _call(g, tmp_path, elicit=elicit)
+    assert "fb" in answer
+    assert len(asked) == 1
 
 
 # --- Repository consent (#141): file tools only after the user accepts ---------------------

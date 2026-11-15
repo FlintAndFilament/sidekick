@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sidekick.config import Config, ConfigError, load_config
+from sidekick.config import Config, ConfigError, load_config, remember_gemini_data_use
 
 
 def _write_config(path: Path, data: dict) -> None:
@@ -194,3 +194,37 @@ def test_openrouter_valid_ids_load(tmp_path: Path) -> None:
         },
     )
     assert load_config(path).openrouter.default_model == "x-ai/grok-4.7"
+
+
+# --- Gemini data-use consent (#142) ---------------------------------------------------------
+
+
+def test_config_without_gemini_data_use_field_loads_as_not_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    _write_config(path, {"auth": {"method": "api_key"}, "openrouter": {"accepted_models": []}})
+    assert load_config(path).gemini_data_use_accepted is False
+
+
+def test_gemini_data_use_accepted_loads_when_set(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    _write_config(path, {"auth": {"method": "api_key"}, "gemini_data_use_accepted": True})
+    assert load_config(path).gemini_data_use_accepted is True
+
+
+def test_remember_gemini_data_use_keeps_other_keys_and_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    original = {"auth": {"method": "api_key"}, "openrouter": {"accepted_models": ["x-ai/grok-4.7"]}}
+    _write_config(path, original)
+    remember_gemini_data_use(path)
+    remember_gemini_data_use(path)
+    assert json.loads(path.read_text()) == {**original, "gemini_data_use_accepted": True}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]  # no temp file left
+    assert load_config(path).gemini_data_use_accepted is True
+
+
+def test_remember_gemini_data_use_never_clobbers_an_unreadable_file(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("{not json")
+    with pytest.raises(ConfigError):
+        remember_gemini_data_use(path)
+    assert path.read_text() == "{not json"

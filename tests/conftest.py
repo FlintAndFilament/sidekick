@@ -1,36 +1,18 @@
 """Shared fixtures."""
 
-import atexit
-import os
-import shutil
-import tempfile
+from pathlib import Path
 
 import pytest
 
 
-def _import_entry_point_with_throwaway_logs() -> None:
-    """Import sidekick.__main__ once, with HOME pointed at a throwaway directory (#136).
+@pytest.fixture(autouse=True)
+def _isolated_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point __main__._LOG_DIR at tmp_path for every test (#136, #144; from PR #137).
 
-    The import configures logging as a side effect: it attaches a file handler under
-    ~/.config/sidekick/logs and prunes old files there. Tests that import the entry point would
-    otherwise write fake-config startup lines into the user's real daily log. conftest loads
-    before any test module, so this import is the one that runs; HOME is restored right after,
-    and only the import-time log directory is affected (config paths are read later).
+    Importing the entry point no longer configures logging, so this guards only a test that
+    calls _setup_log_file() or _configure_logging() directly: it must never touch $HOME.
     """
-    log_home = tempfile.mkdtemp(prefix="sidekick-test-logs-")
-    atexit.register(shutil.rmtree, log_home, ignore_errors=True)
-    real_home = os.environ.get("HOME")
-    os.environ["HOME"] = log_home
-    try:
-        import sidekick.__main__  # noqa: F401 - imported for its logging side effect
-    finally:
-        if real_home is None:
-            del os.environ["HOME"]
-        else:
-            os.environ["HOME"] = real_home
-
-
-_import_entry_point_with_throwaway_logs()
+    monkeypatch.setattr("sidekick.__main__._LOG_DIR", tmp_path / "logs")
 
 
 @pytest.fixture(autouse=True)

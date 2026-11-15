@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from sidekick.client import GeminiClient
 from sidekick.config import Config
 from sidekick.openrouter import ChatMessage
-from sidekick.openrouter_catalog import PINNED_FREE_MODEL, SETUP_PICKS
+from sidekick.openrouter_catalog import PINNED_FREE_MODEL, SETUP_PICKS, price_pair
 from sidekick.router import Router
 from sidekick.tools import list_models as lm
 from sidekick.tools import list_sessions as ls
@@ -29,10 +29,11 @@ def _gemini_with_catalog() -> GeminiClient:
     return client
 
 
-async def _call(source: Any, **args: Any) -> str:
+async def _call(source: Any, elicit: Any = None, **args: Any) -> str:
     mcp = FastMCP("t")
     lm.register(mcp, source, None)  # type: ignore[arg-type]  # transcript is unused
-    result = await mcp.call_tool("list_models", args)
+    with patch.object(lm, "elicitor", lambda ctx: elicit):
+        result = await mcp.call_tool("list_models", args)
     content = result[0] if isinstance(result, tuple) else result
     return content[0].text  # type: ignore[index,no-any-return]
 
@@ -71,7 +72,7 @@ async def test_default_that_is_the_free_default_shows_default_only(tmp_path):
 async def test_privacy_marker_appears_after_check(tmp_path):
     r = Router(make_client(FakeOpenRouter(replies=[(200, reply())]), tmp_path))
     assert "privacy: not checked" in _line(await _call(r), "x-ai/grok-4.7")
-    await _call(r, check="x-ai/grok-4.7")
+    await _call(r, _asker("accept"), check="x-ai/grok-4.7")
     assert "privacy: some providers may store/train" in _line(await _call(r), "x-ai/grok-4.7")
 
 
@@ -94,7 +95,7 @@ async def test_check_unknown_id_sends_nothing(tmp_path):
 
 async def test_check_bad_key_is_an_error(tmp_path):
     fake = FakeOpenRouter(replies=[(401, {"error": {"code": 401, "message": "bad key"}})])
-    out = await _call(Router(make_client(fake, tmp_path)), check="x-ai/grok-4.7")
+    out = await _call(Router(make_client(fake, tmp_path)), _asker("accept"), check="x-ai/grok-4.7")
     assert out.startswith("[sidekick error]")
 
 
@@ -157,3 +158,68 @@ async def test_list_sessions_shows_both_backends(tmp_path):
     rows = [ln.split() for ln in out.splitlines() if ln.startswith("  ")]
     assert rows[1][0] == "review" and rows[1][1] == "b"
     assert rows[2] == ["ask", "a", "x-ai/grok-4.7", "1"]
+
+
+_PAID = "x-ai/grok-4.7"
+
+
+def _asker(outcome: str) -> Any:
+    asked: list[str] = []
+
+    async def elicit(message: str) -> str:
+        asked.append(message)
+        return outcome
+
+    elicit.asked = asked  # type: ignore[attr-defined]
+    return elicit
+
+
+async def test_check_free_model_probes_without_asking(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    ask = _asker("accept")
+    out = await _call(
+        Router(make_client(fake, tmp_path)), ask, check="nvidia/nemotron-3-ultra-550b-a55b:free"
+    )
+    assert ask.asked == [] and len(fake.posts) == 1 and "privacy" in out
+
+
+async def test_check_accepted_paid_model_probes_without_asking(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    ask = _asker("accept")
+    r = Router(make_client(fake, tmp_path, accepted_models=[_PAID]))
+    await _call(r, ask, check=_PAID)
+    assert ask.asked == [] and len(fake.posts) == 1
+
+
+async def test_check_unaccepted_paid_asks_once_then_probes_without_accepting(tmp_path):
+    fake = FakeOpenRouter(replies=[(200, reply())])
+    ask = _asker("accept")
+    client = make_client(fake, tmp_path)
+    out = await _call(Router(client), ask, check=_PAID)
+    assert ask.asked == [
+        f"Check `{_PAID}`'s privacy status? This sends one tiny request to it, billed at "
+        f"{price_pair(client.entry(_PAID))} (a fraction of a cent)."
+    ]
+    assert len(fake.posts) == 1 and "privacy" in out
+    assert not (tmp_path / "config.json").exists()
+    assert not client._accepted
+
+
+async def test_check_unaccepted_paid_declined_sends_nothing(tmp_path):
+    for outcome in ("decline", "cancel"):
+        fake = FakeOpenRouter()
+        out = await _call(Router(make_client(fake, tmp_path)), _asker(outcome), check=_PAID)
+        assert out == f"[sidekick] Not checked: you declined the billed check for `{_PAID}`."
+        assert fake.posts == []
+
+
+async def test_check_unaccepted_paid_cannot_ask_sends_nothing(tmp_path):
+    for elicit in (None, _asker("unavailable")):
+        fake = FakeOpenRouter()
+        out = await _call(Router(make_client(fake, tmp_path)), elicit, check=_PAID)
+        assert out == (
+            f"[sidekick] Not checked: `{_PAID}` is a paid model and sidekick couldn't ask "
+            "before sending a billed check. Accept the model first (use it once interactively), "
+            "or check it from an interactive session."
+        )
+        assert fake.posts == []

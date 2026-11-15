@@ -149,3 +149,11 @@ def test_deprecated_repo_notice_flag_still_loads():
         {"openrouter": {"repo_access_notice_shown": True}}, context={"openrouter_key": True}
     )
     assert cfg.openrouter.repo_access_models == []
+
+
+def test_remember_refuses_openrouter_that_is_not_an_object(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"openrouter": ["x"]}')
+    with pytest.raises(ConfigError, match="must be a JSON object"):
+        remember_accepted_model("x-ai/grok-4.7", path)
+    assert path.read_text() == '{"openrouter": ["x"]}'

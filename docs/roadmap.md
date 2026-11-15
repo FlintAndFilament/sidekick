@@ -304,6 +304,12 @@ Also in `v0.5.0`:
 - A `require_parameters` 404 (no provider takes `tools`) gets the tools-aware message instead
   of OpenRouter's raw text, and the free default falls back to another free model on it.
 
+### Consent questions in the log (#148) — 0.7.5
+
+- Each consent question logs one INFO line on `sidekick.consent`: kind (`model_use`,
+  `repo_access`, `billed_check`, `gemini_data_use`), model id and outcome (`accept`, `decline`,
+  `cancel`, `unavailable`). No question or prompt text. Declines are now recorded too.
+
 ---
 
 ## Open

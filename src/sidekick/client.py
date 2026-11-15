@@ -35,6 +35,7 @@ import random
 import re
 import time
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
@@ -47,7 +48,14 @@ from google.genai.types import ThinkingLevel as SDKThinkingLevel
 
 from sidekick import models
 from sidekick.backends import Elicit, Preflight, Session, Surface
-from sidekick.config import Config, ModelFamily, ThinkingLevel
+from sidekick.config import (
+    CONFIG_PATH,
+    Config,
+    ConfigError,
+    ModelFamily,
+    ThinkingLevel,
+    remember_gemini_data_use,
+)
 from sidekick.errors import ClientError
 from sidekick.tool_loop import ToolCallRecord, ToolRegistry, run_tool_loop
 from sidekick.web_tools import web_tool_set
@@ -58,7 +66,9 @@ __all__ = [
     "Session",
     "DEFAULT_MODEL",
     "FALLBACK_MODEL",
-    "GEMINI_UNPAID_NOTICE",
+    "GEMINI_DATA_USE_DECLINED",
+    "GEMINI_DATA_USE_QUESTION",
+    "GEMINI_DATA_USE_UNASKED",
 ]
 
 # Offline defaults (#69). At startup the bridge resolves the newest Flash / Flash-Lite / Pro from
@@ -107,10 +117,21 @@ _LEVEL_REJECTED = re.compile(r"Thinking level (\w+) is not supported for this mo
 _LEVEL_UNSUPPORTED = "Thinking level is not supported for this model"
 _BUDGET_ZERO_REJECTED = re.compile(r"Budget 0 is invalid|only works in thinking mode")
 
-GEMINI_UNPAID_NOTICE = (
-    "[sidekick notice] If this Gemini API key's Cloud project has no billing, Google may use "
-    "your prompts and responses to improve its products. block_data_collection does not apply "
-    "to Gemini.\n\n"
+# Asked once per install before the first API-key call (#142); accepting is remembered in
+# config.json as gemini_data_use_accepted. ADC/Vertex never asks.
+GEMINI_DATA_USE_QUESTION = (
+    "Use Gemini through your API key? If the key's Google Cloud project has no billing, Google "
+    "may use your prompts and responses, including any code sent with them, to improve its "
+    "products. block_data_collection does not apply to Gemini."
+)
+GEMINI_DATA_USE_DECLINED = (
+    "[sidekick] Not sent: you declined Gemini's data-use terms. Use an OpenRouter model, or a "
+    "Gemini key whose project has billing (then accept)."
+)
+GEMINI_DATA_USE_UNASKED = (
+    "[sidekick] Not sent: sidekick couldn't ask you to accept Gemini's data-use terms here. "
+    "Accept from an interactive session, or set gemini_data_use_accepted: true in "
+    "~/.config/sidekick/config.json."
 )
 
 _NO_OPENROUTER_KEY = (
@@ -189,10 +210,13 @@ class GeminiClient:
         credentials: Optional[google.auth.credentials.Credentials] = None,
         api_key: Optional[str] = None,
         *,
-        unpaid_tier_notice: bool = False,
+        needs_data_use_consent: bool = False,
+        config_path: Path = CONFIG_PATH,
     ) -> None:
         self._config = config
-        self._notice_pending = unpaid_tier_notice
+        # API-key auth: nothing is sent until the user accepts Google's data-use terms (#142).
+        self._needs_consent = needs_data_use_consent and not config.gemini_data_use_accepted
+        self._config_path = config_path
         if api_key:
             self._raw_client = genai.Client(api_key=api_key)
         else:
@@ -275,12 +299,25 @@ class GeminiClient:
     async def preflight(
         self, model: str, elicit: Optional[Elicit], *, want_tools: bool = False
     ) -> Preflight:
-        """Nothing to confirm for Gemini, which reads files by design (want_tools is ignored);
-        optionally a one-time unpaid-tier privacy notice."""
-        if self._notice_pending:
-            self._notice_pending = False
-            return Preflight(True, notice=GEMINI_UNPAID_NOTICE)
-        return Preflight(True)
+        """Gemini reads files by design (want_tools is ignored). With API-key auth, the first call
+        asks the user to accept Google's data-use terms; fails closed when sidekick can't ask
+        (`elicit` is None, or asking fails): nothing is sent. Declining is asked again next call."""
+        if not self._needs_consent:
+            return Preflight(True)
+        outcome = await elicit(GEMINI_DATA_USE_QUESTION) if elicit else "unavailable"
+        if outcome == "accept":
+            self._needs_consent = False
+            try:
+                remember_gemini_data_use(self._config_path)
+            except (ConfigError, OSError) as exc:
+                _log.warning(
+                    "Gemini data-use terms accepted for this session only; config not updated (%s)",
+                    type(exc).__name__,
+                )
+            return Preflight(True)
+        if outcome in ("decline", "cancel"):
+            return Preflight(False, message=GEMINI_DATA_USE_DECLINED)
+        return Preflight(False, message=GEMINI_DATA_USE_UNASKED)
 
     @property
     def surface(self) -> Surface:

@@ -143,6 +143,9 @@ class Config(BaseModel):
     web_tools: WebToolsConfig = WebToolsConfig()
     auth: AuthConfig = AuthConfig()
     openrouter: OpenRouterConfig = OpenRouterConfig()
+    # true = the user accepted that Google may use prompts sent through an unbilled Gemini API
+    # key; see remember_gemini_data_use. Only API-key auth asks (#142).
+    gemini_data_use_accepted: bool = False
 
     @model_validator(mode="after")
     def project_required_for_vertex(self, info: ValidationInfo) -> "Config":
@@ -228,13 +231,11 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         raise ConfigError(f"Config validation failed: {exc}") from exc
 
 
-def _update_openrouter_section(
-    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]
-) -> None:
-    """Read config.json, apply `update` to its 'openrouter' object, write it back. Raises ConfigError.
+def _update_config(path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    """Read config.json, apply `update` to its top-level object, write it back. Raises ConfigError.
 
     Never overwrites a file it cannot parse; the write goes through a temp file and os.replace.
-    `update` returns the new section; returning it unchanged skips the write."""
+    `update` returns the new object; returning it unchanged skips the write."""
     try:
         raw = json.loads(path.read_text()) if path.exists() else {}
     except json.JSONDecodeError as exc:
@@ -243,23 +244,34 @@ def _update_openrouter_section(
         raise ConfigError(f"Config file could not be read ({path}): {exc.strerror}") from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"Config file must hold a JSON object ({path}).")
-    section = raw.get("openrouter")
-    if section is None:
-        section = {}
-    if not isinstance(section, dict):
-        raise ConfigError(f"'openrouter' in {path} must be a JSON object.")
-    updated = update(section)
-    if updated == section:
+    updated = update(raw)
+    if updated == raw:
         return
-    raw["openrouter"] = updated
     tmp = path.with_name(path.name + ".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(raw, indent=2) + "\n")
+        tmp.write_text(json.dumps(updated, indent=2) + "\n")
         os.replace(tmp, path)
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise ConfigError(f"Config file could not be written ({path}): {exc.strerror}") from exc
+
+
+def _update_openrouter_section(
+    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]
+) -> None:
+    """Apply `update` to config.json's 'openrouter' object (see _update_config). Raises ConfigError."""
+
+    def apply(raw: dict[str, Any]) -> dict[str, Any]:
+        section = raw.get("openrouter")
+        if section is None:
+            section = {}
+        if not isinstance(section, dict):
+            raise ConfigError(f"'openrouter' in {path} must be a JSON object.")
+        updated = update(section)
+        return raw if updated == section else {**raw, "openrouter": updated}
+
+    _update_config(path, apply)
 
 
 def _append_model(path: Path, key: str, model_id: str) -> None:
@@ -284,3 +296,9 @@ def remember_accepted_model(model_id: str, path: Path = CONFIG_PATH) -> None:
 def remember_repo_access(model_id: str, path: Path = CONFIG_PATH) -> None:
     """Record that an OpenRouter model may read repository files. Raises ConfigError."""
     _append_model(path, "repo_access_models", model_id)
+
+
+def remember_gemini_data_use(path: Path = CONFIG_PATH) -> None:
+    """Record that the user accepted Gemini's data-use terms for API-key auth (#142).
+    Raises ConfigError."""
+    _update_config(path, lambda raw: {**raw, "gemini_data_use_accepted": True})

@@ -268,6 +268,15 @@ Also in `v0.5.0`:
   unaccepted paid model is refused before anything is sent, including the billed privacy check;
   the message says how to accept it.
 
+### Ask before Gemini data use (#142) — unreleased
+
+- With an API key, the first Gemini call asks you to accept that Google may use prompts and
+  responses (including code) when the key's project has no billing. Nothing is sent until you
+  accept; the answer is remembered per install as `gemini_data_use_accepted`. Declining sends
+  nothing and asks again next call; no way to ask refuses with nothing sent. This replaces the
+  one-time reply-text notice. The 503/429 fallback is covered by the same answer. Agent
+  Platform auth never asks.
+
 ---
 
 ## Open

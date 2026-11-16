@@ -49,7 +49,7 @@ CAPABILITIES: tuple[ToolCapability, ...] = (
 
 def effective_capabilities(overrides: Mapping[ToolName, AccessLevel]) -> tuple[ToolCapability, ...]:
     """CAPABILITIES with each tool's access level replaced where `overrides` names it (#132)."""
-    levels: dict[str, AccessLevel] = dict(overrides)
+    levels: dict[str, AccessLevel] = {str(k): v for k, v in overrides.items()}
     return tuple(replace(c, access=levels.get(c.name, c.access)) for c in CAPABILITIES)
 
 

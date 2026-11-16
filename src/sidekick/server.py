@@ -60,13 +60,19 @@ def build_server(
     `workspace` gives the generating tools repo file access; None disables it entirely.
     `capabilities` are the resolved per-tool rows (tool_access applied); a tool whose row is
     missing keeps its default."""
+    rows = {c.name: c for c in (*CAPABILITIES, *capabilities)}  # later rows win
+    resolved = [rows[c.name] for c in CAPABILITIES]
     mcp = FastMCP(
         _SERVER_NAME,
         instructions=server_instructions(
-            workspace, transcript, client.web_default, client.web_supported, surface=client.surface
+            workspace,
+            transcript,
+            client.web_default,
+            client.web_supported,
+            surface=client.surface,
+            capabilities=resolved,
         ),
     )
-    rows = {c.name: c for c in (*CAPABILITIES, *capabilities)}  # later rows win
     register_ask(mcp, client, transcript, workspace, rows["ask"])
     register_brainstorm(mcp, client, transcript, workspace, rows["brainstorm"])
     register_review(mcp, client, transcript, workspace, rows["review"])
@@ -83,6 +89,7 @@ def build_server(
             client.web_supported,
             topic=topic,
             surface=client.surface,
+            capabilities=resolved,
         ),
         HELP_TOPICS,
     )

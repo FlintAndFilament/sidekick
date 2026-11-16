@@ -79,6 +79,7 @@ def register(
         description=_DESCRIPTION
         + capability_hint(
             workspace,
+            read=cap.read,
             write=cap.write,
             artifacts=_ARTIFACTS,
             web_default=client.web_default,

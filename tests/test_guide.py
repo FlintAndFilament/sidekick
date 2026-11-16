@@ -15,7 +15,12 @@ import pytest
 
 from sidekick.backends import Surface
 from sidekick.guide import HELP_TOPICS, INSTRUCTIONS_BUDGET, help_text, server_instructions
-from sidekick.tools import CAPABILITIES, HELP_TOOL_NAME, LIST_MODELS_TOOL_NAME
+from sidekick.tools import (
+    CAPABILITIES,
+    HELP_TOOL_NAME,
+    LIST_MODELS_TOOL_NAME,
+    effective_capabilities,
+)
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace
 from tests.test_capability_metadata import _server, _tools, _workspace
@@ -350,3 +355,27 @@ class TestToolHelpMatchesSurface:
         surface = Surface("openrouter", False, False, False, False)
         text = help_text(_workspace(tmp_path), topic="ask", surface=surface)
         assert "conversation only" in text
+
+
+def test_help_topic_matches_override(tmp_path):
+    caps = effective_capabilities({"review": "read"})
+    assert "MAY MODIFY" not in help_text(_workspace(tmp_path), topic="review", capabilities=caps)
+
+
+def test_files_topic_lists_override_correctly(tmp_path):
+    caps = effective_capabilities({"review": "read", "ask": "none"})
+    files = help_text(_workspace(tmp_path), topic="files", capabilities=caps)
+    writers = files.split("write_file (up to")[1]
+    assert "review" not in writers.split("Review their")[0].split("on: ")[1]
+    assert "No repository access: ask." in files
+    ins = server_instructions(_workspace(tmp_path), capabilities=caps)
+    assert "No repository access: ask." in ins
+
+
+def test_instructions_fit_budget_at_extremes(tmp_path):
+    for level in ("none", "read", "write"):
+        caps = effective_capabilities(
+            {n: level for n in ("ask", "brainstorm", "review", "debug", "architect")}
+        )
+        text = server_instructions(_workspace(tmp_path), capabilities=caps)
+        assert len(text) <= INSTRUCTIONS_BUDGET

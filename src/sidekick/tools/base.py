@@ -263,9 +263,17 @@ def _openrouter_hint(
     return hint + disk + _ARTIFACT_CLAUSE[artifacts] + _OPENROUTER_WEB
 
 
+_NONE_ROW = (
+    "\n\nRepository access: none for this tool (set by tool_access in the sidekick config). "
+    "The model cannot read any file, so include the code or context you want considered "
+    "directly in this call."
+)
+
+
 def capability_hint(
     workspace: Optional[Workspace],
     *,
+    read: bool = True,
     write: bool,
     artifacts: ArtifactMode = "never",
     web_default: bool = False,
@@ -284,6 +292,14 @@ def capability_hint(
     tools are switched off, so the hint never claims the call leaves the tree untouched.
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
+    if not read:
+        # tool_access = none: no file tool is offered, whatever the workspace or backend.
+        web_note = (
+            _OPENROUTER_WEB
+            if default_backend == "openrouter"
+            else _web_note(web_default, write_capable=False, supported=web_supported)
+        )
+        return _NONE_ROW + disk + _ARTIFACT_CLAUSE[artifacts] + web_note
     if default_backend == "openrouter":
         return _openrouter_hint(workspace, write, artifacts, gemini_available, disk, files)
     # Only claim write_file is withheld where it would otherwise have been offered:

@@ -44,7 +44,7 @@ from sidekick.tools import (
     LIST_MODELS_TOOL_NAME,
     LIST_SESSIONS_TOOL_NAME,
 )
-from sidekick.tools.base import capability_hint, session_param_hint
+from sidekick.tools.base import ToolCapability, capability_hint, session_param_hint
 from sidekick.transcript import TranscriptWriter
 from sidekick.web_tools import WEB_TOOL_NAMES
 from sidekick.workspace import Workspace
@@ -103,8 +103,16 @@ def _or_access(surface: Optional[Surface], workspace: Optional[Workspace]) -> st
     return _OR_ACCESS_FILES if files else _OR_ACCESS
 
 
-def _writers(workspace: Optional[Workspace]) -> list[str]:
-    return [c.name for c in CAPABILITIES if c.write] if _writes_possible(workspace) else []
+def _writers(workspace: Optional[Workspace], caps: Sequence[ToolCapability]) -> list[str]:
+    return [c.name for c in caps if c.write] if _writes_possible(workspace) else []
+
+
+def _blind(workspace: Optional[Workspace], caps: Sequence[ToolCapability]) -> str:
+    """One sentence naming the tools tool_access = none leaves without file reads, or ''."""
+    names = [c.name for c in caps if not c.read]
+    if not names or not _writes_possible(workspace):
+        return ""
+    return f"No repository access: {_sentence(names)}."
 
 
 # ---------------------------------------------------------------- instructions (the overview)
@@ -122,10 +130,16 @@ def _short_deny(workspace: Workspace) -> str:
     return f"{len(deny)} configured deny patterns apply"
 
 
-def _short_access(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
+def _short_access(
+    workspace: Optional[Workspace],
+    surface: Optional[Surface] = None,
+    caps: Sequence[ToolCapability] = CAPABILITIES,
+) -> str:
+    blind = _blind(workspace, caps)
     if _openrouter(surface):
         gemini = surface is not None and surface.gemini_available and _writes_possible(workspace)
-        return _or_access(surface, workspace) + (_OR_GEMINI_ACCESS if gemini else "")
+        text = _or_access(surface, workspace) + (_OR_GEMINI_ACCESS if gemini else "")
+        return text + (" " + blind if blind else "")
     if workspace is None:
         return "Repository: OFF. Gemini cannot read your files, so paste what it needs."
     if not workspace.tools_enabled:
@@ -138,12 +152,14 @@ def _short_access(workspace: Optional[Workspace], surface: Optional[Surface] = N
         f"({', '.join(READ_TOOL_NAMES)}), so name paths instead of pasting. "
         f"{_short_deny(workspace)}."
     )
-    writers = _writers(workspace)
+    writers = _writers(workspace, caps)
     if writers:
         text += (
             f"\n{_sentence(writers)} may also create or overwrite files there with write_file "
             "(never delete or execute)."
         )
+    if blind:
+        text += "\n" + blind
     return text
 
 
@@ -152,6 +168,7 @@ def _short_web(
     default: bool,
     supported: bool,
     surface: Optional[Surface] = None,
+    caps: Sequence[ToolCapability] = CAPABILITIES,
 ) -> str:
     if _openrouter(surface):
         return _OR_WEB
@@ -162,7 +179,7 @@ def _short_web(
         "on anything newer than Gemini's training data (versions, CVEs, current docs). The "
         "answer lists its sources; treat what it finds as claims to verify."
     )
-    if _writers(workspace):
+    if _writers(workspace, caps):
         text += (
             " web=true removes write_file for that call: to research then write, make two calls "
             "and give the writing one a new session_name."
@@ -170,9 +187,13 @@ def _short_web(
     return text
 
 
-def _short_params(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
-    by_default = _sentence([c.name for c in CAPABILITIES if c.artifacts == "default"])
-    opt_in = _sentence([c.name for c in CAPABILITIES if c.artifacts == "opt-in"])
+def _short_params(
+    workspace: Optional[Workspace],
+    surface: Optional[Surface] = None,
+    caps: Sequence[ToolCapability] = CAPABILITIES,
+) -> str:
+    by_default = _sentence([c.name for c in caps if c.artifacts == "default"])
+    opt_in = _sentence([c.name for c in caps if c.artifacts == "opt-in"])
     if workspace is None:
         artifact = "write_artifact: no effect (no workspace)"
     else:
@@ -203,6 +224,7 @@ def server_instructions(
     web_supported: bool = True,
     *,
     surface: Optional[Surface] = None,
+    capabilities: Sequence[ToolCapability] = CAPABILITIES,
 ) -> str:
     """The instructions the MCP client sees on connect, kept within INSTRUCTIONS_BUDGET (#78).
 
@@ -212,7 +234,7 @@ def server_instructions(
     """
     del transcript
     tools = ["Tools:"]
-    tools += [f"- {c.name}: {_brief(c.summary)}" for c in CAPABILITIES]
+    tools += [f"- {c.name}: {_brief(c.summary)}" for c in capabilities]
     tools.append(f"- {LIST_MODELS_TOOL_NAME}: models on this backend, for model=.")
     tools.append(f"- {LIST_SESSIONS_TOOL_NAME}: conversations in memory, to continue one.")
     tools.append(f"- {HELP_TOOL_NAME}: full detail on demand.")
@@ -221,9 +243,9 @@ def server_instructions(
             "sidekick: a second opinion from the model you choose (OpenRouter, or Google Gemini "
             "directly). Each generating tool keeps its own conversation.",
             "\n".join(tools),
-            _short_access(workspace, surface),
-            _short_web(workspace, web_default, web_supported, surface),
-            _short_params(workspace, surface),
+            _short_access(workspace, surface, capabilities),
+            _short_web(workspace, web_default, web_supported, surface, capabilities),
+            _short_params(workspace, surface, capabilities),
             "Every generating call is logged to a transcript. More: "
             f"{HELP_TOOL_NAME}(topic=...) with {', '.join(_GENERAL_TOPICS)}, or a tool name.",
         ]
@@ -263,20 +285,28 @@ def _readable_but_skipped(workspace: Workspace) -> str:
     return ", ".join(names)
 
 
-def _files_topic(workspace: Optional[Workspace], surface: Optional[Surface] = None) -> str:
+def _files_topic(
+    workspace: Optional[Workspace],
+    surface: Optional[Surface] = None,
+    caps: Sequence[ToolCapability] = CAPABILITIES,
+) -> str:
     """The read/write rows, built from each tool module's declared capability (#74)."""
     if _openrouter(surface):
         text = _or_access(surface, workspace).removeprefix("Repository: ")
         text = "Repository access: " + text[0].upper() + text[1:]
+        blind = _blind(workspace, caps)
+        if blind:
+            text += " " + blind
         if surface is None or not surface.gemini_available:
             return text
-        return text + _OR_GEMINI_ACCESS + "\n\n" + _files_topic(workspace)
+        return text + _OR_GEMINI_ACCESS + "\n\n" + _files_topic(workspace, None, caps)
     if workspace is None:
         return _NO_ACCESS.format(reason="")
     if not workspace.tools_enabled:
         return _NO_ACCESS.format(reason=f" ({workspace.disabled_reason})")
-    read_only = _sentence([c.name for c in CAPABILITIES if not c.write])
-    writers = _sentence(_writers(workspace))
+    read_only = _sentence([c.name for c in caps if c.read and not c.write])
+    writers = _sentence(_writers(workspace, caps))
+    blind = _blind(workspace, caps)
     rows = _ACCESS_HEAD.format(
         root=workspace.sandbox.root,
         read_tools=", ".join(READ_TOOL_NAMES),
@@ -289,6 +319,8 @@ def _files_topic(workspace: Optional[Workspace], surface: Optional[Surface] = No
     )
     if read_only:
         rows += f"- Gemini cannot modify the working tree on: {read_only}.\n"
+    if blind:
+        rows += f"- {blind} They see only what you put in the call.\n"
     if writers:
         rows += (
             "- Gemini MAY create or overwrite files under the root with write_file (up to "
@@ -303,6 +335,7 @@ def _web_topic(
     default: bool,
     supported: bool,
     surface: Optional[Surface] = None,
+    caps: Sequence[ToolCapability] = CAPABILITIES,
 ) -> str:
     """The web-access row (#76), derived from config rather than restated.
 
@@ -312,7 +345,11 @@ def _web_topic(
     if _openrouter(surface):
         if surface is None or not surface.gemini_available:
             return _OR_WEB
-        return _OR_WEB + "\n\nOn Gemini models:\n" + _web_topic(workspace, default, supported)
+        return (
+            _OR_WEB
+            + "\n\nOn Gemini models:\n"
+            + _web_topic(workspace, default, supported, None, caps)
+        )
     if not supported:
         return (
             "Web access is UNAVAILABLE on this backend: the flag that lets the API's built-in "
@@ -320,7 +357,7 @@ def _web_topic(
             "web=true is accepted but ignored, and the reply carries a notice."
         )
     state = "ON by default" if default else "OFF by default"
-    writers = _sentence(_writers(workspace))
+    writers = _sentence(_writers(workspace, caps))
     row = (
         f"Web access is {state}. Every generating tool takes web=true/false to override it for "
         f"one call. With it on, Gemini can {' and '.join(WEB_TOOL_NAMES)} through the Gemini "
@@ -346,19 +383,21 @@ def _web_topic(
     return row.rstrip()
 
 
-def _sessions_topic(workspace: Optional[Workspace]) -> str:
+def _sessions_topic(workspace: Optional[Workspace], caps: Sequence[ToolCapability]) -> str:
     """The session_name contract, from the same text the parameter itself advertises."""
     return (
         "Sessions (session_name): "
-        + session_param_hint(workspace, write=_writes_possible(workspace))
+        + session_param_hint(workspace, write=bool(_writers(workspace, caps)))
         + f" {LIST_SESSIONS_TOOL_NAME} shows the live ones."
     )
 
 
-def _disk_topic(transcript_path: str, workspace: Optional[Workspace]) -> str:
+def _disk_topic(
+    transcript_path: str, workspace: Optional[Workspace], caps: Sequence[ToolCapability]
+) -> str:
     """What reaches disk regardless of the repository-access setting."""
     artifacts_dir = str(workspace.artifacts.directory) if workspace is not None else None
-    generating = _sentence([c.name for c in CAPABILITIES])
+    generating = _sentence([c.name for c in caps])
     lines = [
         "What this server writes to disk, whatever the repository-access setting says:",
         "",
@@ -366,8 +405,8 @@ def _disk_topic(transcript_path: str, workspace: Optional[Workspace]) -> str:
         f"{transcript_path}. {LIST_MODELS_TOOL_NAME}, {LIST_SESSIONS_TOOL_NAME} and "
         f"{HELP_TOOL_NAME} write nothing.",
     ]
-    by_default = _sentence([c.name for c in CAPABILITIES if c.artifacts == "default"])
-    opt_in = _sentence([c.name for c in CAPABILITIES if c.artifacts == "opt-in"])
+    by_default = _sentence([c.name for c in caps if c.artifacts == "default"])
+    opt_in = _sentence([c.name for c in caps if c.artifacts == "opt-in"])
     if artifacts_dir and (by_default or opt_in):
         clauses = []
         if by_default:
@@ -390,9 +429,9 @@ def _disk_topic(transcript_path: str, workspace: Optional[Workspace]) -> str:
     return "\n".join(lines)
 
 
-def _tools_topic() -> str:
+def _tools_topic(caps: Sequence[ToolCapability]) -> str:
     lines = ["Choosing a tool:", ""]
-    lines += [f"- {c.name}: {c.summary}" for c in CAPABILITIES]
+    lines += [f"- {c.name}: {c.summary}" for c in caps]
     lines.append(
         f"- {LIST_MODELS_TOOL_NAME}: list the models this backend offers, for the model= "
         "parameter. Aliases flash, flash-lite and pro always track the newest release."
@@ -448,20 +487,22 @@ def help_text(
     topic: Optional[str] = None,
     *,
     surface: Optional[Surface] = None,
+    capabilities: Sequence[ToolCapability] = CAPABILITIES,
 ) -> str:
     """One help topic, or every topic when `topic` is None (#78)."""
     transcript_path = str(transcript.path) if transcript else "the configured transcript directory"
     sections = {
-        "tools": _tools_topic(),
-        "files": _files_topic(workspace, surface),
-        "web": _web_topic(workspace, web_default, web_supported, surface),
-        "sessions": _sessions_topic(workspace),
-        "disk": _disk_topic(transcript_path, workspace),
+        "tools": _tools_topic(capabilities),
+        "files": _files_topic(workspace, surface, capabilities),
+        "web": _web_topic(workspace, web_default, web_supported, surface, capabilities),
+        "sessions": _sessions_topic(workspace, capabilities),
+        "disk": _disk_topic(transcript_path, workspace, capabilities),
         "models": _MODELS_TOPIC if _openrouter(surface) else _GEMINI_MODELS_TOPIC,
     }
-    for cap in CAPABILITIES:
+    for cap in capabilities:
         sections[cap.name] = f"{cap.name}: {cap.summary}" + capability_hint(
             workspace,
+            read=cap.read,
             write=cap.write,
             artifacts=cap.artifacts,
             web_default=web_default,

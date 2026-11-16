@@ -18,8 +18,8 @@ from mcp.types import Tool
 from sidekick.client import GeminiClient
 from sidekick.config import Config
 from sidekick.guide import help_text
-from sidekick.tools import effective_capabilities
 from sidekick.server import build_server, server_instructions
+from sidekick.tools import effective_capabilities
 from sidekick.tools.base import capability_hint, tool_annotations
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace, build_workspace
@@ -473,8 +473,7 @@ class TestInstructionsStayWellFormed:
     """The rows are built from a mutable capability set; the prose must survive any of them."""
 
     def _always_writes_line(self, caps: object, tmp_path: Path) -> str:
-        with patch("sidekick.guide.CAPABILITIES", caps):
-            text = _full(_workspace(tmp_path))
+        text = help_text(_workspace(tmp_path), capabilities=caps)  # type: ignore[arg-type]
         return next(ln for ln in text.splitlines() if "Markdown artifact" in ln)
 
     def test_no_dangling_verb_when_nothing_saves_by_default(self, tmp_path: Path) -> None:
@@ -493,8 +492,7 @@ class TestInstructionsStayWellFormed:
         from sidekick.tools.base import ToolCapability
 
         caps = (ToolCapability("ask", access="read", artifacts="never"),)
-        with patch("sidekick.guide.CAPABILITIES", caps):
-            text = _full(_workspace(tmp_path))
+        text = help_text(_workspace(tmp_path), capabilities=caps)
         assert "Markdown artifact" not in text
 
     def test_skipped_row_reads_as_nothing_when_all_are_denied(self, tmp_path: Path) -> None:
@@ -623,3 +621,43 @@ def test_override_replaces_only_that_tool() -> None:
     assert rows["ask"].write and rows["ask"].read
     assert rows["architect"].access == "write"
     assert rows["review"].artifacts == "default"  # artifacts untouched
+
+
+def test_none_row_says_no_access_on_gemini(tmp_path):
+    h = capability_hint(_workspace(tmp_path), read=False, write=False)
+    assert "Repository access: none for this tool" in h and "read_file" not in h
+
+
+def test_none_row_says_no_access_on_openrouter(tmp_path):
+    h = capability_hint(
+        _workspace(tmp_path),
+        read=False,
+        write=False,
+        default_backend="openrouter",
+        files=True,
+    )
+    assert "Repository access: none for this tool" in h
+
+
+def test_none_on_write_tool_with_web_omits_withheld_claim(tmp_path):
+    h = capability_hint(_workspace(tmp_path), read=False, write=False, web_default=True)
+    assert "write_file is withheld" not in h
+
+
+def test_override_write_with_kill_switch_stays_safe(tmp_path):
+    ws = _workspace(tmp_path, enabled=False)
+    assert tool_annotations(ws, write=True).destructiveHint is False
+    assert "Repository access: OFF" in capability_hint(ws, write=True)
+
+
+def test_built_server_advertises_the_override(tmp_path):
+    mcp = build_server(
+        _client(),
+        TranscriptWriter(str(tmp_path / "t"), datetime.now()),
+        _workspace(tmp_path),
+        effective_capabilities({"review": "read", "ask": "none"}),
+    )
+    tools = _tools(mcp)
+    assert "MAY MODIFY" not in tools["review"].description
+    assert tools["review"].annotations.destructiveHint is False
+    assert "Repository access: none for this tool" in tools["ask"].description

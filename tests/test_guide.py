@@ -379,3 +379,13 @@ def test_instructions_fit_budget_at_extremes(tmp_path):
         )
         text = server_instructions(_workspace(tmp_path), capabilities=caps)
         assert len(text) <= INSTRUCTIONS_BUDGET
+
+
+def test_no_tool_reads_files_says_so(tmp_path):
+    caps = effective_capabilities(
+        {n: "none" for n in ("ask", "brainstorm", "review", "debug", "architect")}
+    )
+    text = server_instructions(_workspace(tmp_path), capabilities=caps)
+    assert "Repository: ON" not in text and "name paths" not in text
+    assert "no tool" in text.lower()
+    assert len(text) <= INSTRUCTIONS_BUDGET

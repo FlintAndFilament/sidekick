@@ -248,8 +248,9 @@ def test_tool_access_accepts_each_level() -> None:
 
 def test_tool_access_unknown_tool_is_rejected() -> None:
     with pytest.raises(ConfigError) as exc:
-        _load({"tool_access": {"reveiw": "none"}})
+        _load({"tool_access": {"sk-or-v1-abc": "none"}})
     assert "tool_access" in str(exc.value)
+    assert "sk-or-v1-abc" not in str(exc.value)
 
 
 def test_tool_access_unknown_level_is_rejected_without_echo() -> None:

@@ -147,6 +147,11 @@ def _short_access(
             f"Repository: OFF ({workspace.disabled_reason}). Gemini cannot read your files, so "
             "paste what it needs."
         )
+    if not any(c.read for c in caps):
+        return (
+            "Repository: no tool has file access (tool_access), so Gemini cannot read your "
+            "files; paste what it needs."
+        )
     text = (
         f"Repository: ON. Gemini reads files under {workspace.sandbox.root} itself "
         f"({', '.join(READ_TOOL_NAMES)}), so name paths instead of pasting. "

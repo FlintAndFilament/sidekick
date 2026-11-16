@@ -200,6 +200,16 @@ def gemini_configured(config: Config, openrouter_key_present: bool) -> bool:
     )
 
 
+def _safe_loc(loc: tuple[int | str, ...]) -> str:
+    """Render a pydantic error location without echoing a dict key: pydantic puts an invalid
+    key into loc just before "[key]", and a key is user input (could be a secret)."""
+    parts = [str(p) for p in loc]
+    for i, p in enumerate(parts):
+        if p == "[key]" and i:
+            parts[i - 1] = "<unknown name>"
+    return ".".join(parts)
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
     """Load and validate config from path. Raises ConfigError on any failure.
 
@@ -227,7 +237,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     except ValidationError as exc:
         # Built from loc + msg only: pydantic's own text echoes input values, which could be a key.
         detail = "\n".join(
-            f"{'.'.join(str(p) for p in e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
+            f"{_safe_loc(e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
             for e in exc.errors(include_input=False)
         )
         raise ConfigError(

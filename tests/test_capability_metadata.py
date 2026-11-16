@@ -661,3 +661,27 @@ def test_built_server_advertises_the_override(tmp_path):
     assert "MAY MODIFY" not in tools["review"].description
     assert tools["review"].annotations.destructiveHint is False
     assert "Repository access: none for this tool" in tools["ask"].description
+
+
+class TestWebParamHint:
+    def test_helper_follows_write(self) -> None:
+        from sidekick.tools.base import web_param_hint
+
+        assert "write_file is withheld" in web_param_hint(True)
+        assert "write_file" not in web_param_hint(False)
+
+    def test_each_tool_param_follows_its_level(self, tmp_path: Path) -> None:
+        from sidekick.tools import effective_capabilities
+
+        transcript = TranscriptWriter(str(tmp_path / "t"), datetime.now())
+        caps = effective_capabilities({"review": "read", "ask": "write"})
+        mcp = build_server(_client(), transcript, _workspace(tmp_path), caps)  # type: ignore[arg-type]
+        tools = _tools(mcp)
+
+        def hint(t: str) -> str:
+            return tools[t].inputSchema["properties"]["web"]["description"]
+
+        assert "write_file" not in hint("review")
+        assert "write_file is withheld" in hint("ask")
+        assert "write_file is withheld" in hint("architect")
+        assert "write_file" not in hint("debug")

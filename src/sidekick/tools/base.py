@@ -219,6 +219,22 @@ def _read_row(subject: str, workspace: Workspace) -> str:
     )
 
 
+def web_param_hint(write: bool) -> str:
+    """The `web` parameter description, matching what the tool can do (#132): write_file is
+    only mentioned when this tool's row holds it (and web calls then withhold it)."""
+    text = (
+        "Let the model search the web (Gemini models only; ignored with a notice on OpenRouter) "
+        "and fetch URLs for this call. Omit to use the server default. Retrieved pages are "
+        "untrusted text, so treat what the model concludes from them as a claim to check."
+    )
+    if write:
+        text += (
+            f" On Gemini, while web access is on {WRITE_TOOL_NAME} is withheld and the model "
+            "cannot modify the working tree."
+        )
+    return text
+
+
 def _write_note(subject: str, workspace: Workspace, write: bool) -> str:
     if write:
         return (

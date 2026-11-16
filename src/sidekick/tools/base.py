@@ -42,7 +42,7 @@ from sidekick.client import (
 )
 
 _log = logging.getLogger(__name__)
-from sidekick.config import ThinkingLevel
+from sidekick.config import AccessLevel, ThinkingLevel
 from sidekick.file_tools import READ_TOOL_NAMES, WRITE_TOOL_NAME
 from sidekick.sandbox import DEFAULT_DENY, Sandbox
 from sidekick.sources import record_uris, resolve_redirects, sources_footer
@@ -123,13 +123,21 @@ class ToolCapability:
     """One tool's capability row — the single source of truth for what it may do (#74).
 
     Each tool module declares its own; server.py builds the advertised rows from the
-    collected set, so adding a tool or flipping its `write` flag updates every channel.
+    collected set, so adding a tool or changing its `access` level updates every channel.
     """
 
     name: str
-    write: bool
+    access: AccessLevel
     artifacts: ArtifactMode
     summary: str = ""  # the tool's own description, reused for "choosing a tool" (#74)
+
+    @property
+    def read(self) -> bool:
+        return self.access != "none"
+
+    @property
+    def write(self) -> bool:
+        return self.access == "write"
 
 
 def deny_note(sandbox: Sandbox) -> str:
@@ -211,6 +219,22 @@ def _read_row(subject: str, workspace: Workspace) -> str:
     )
 
 
+def web_param_hint(write: bool) -> str:
+    """The `web` parameter description, matching what the tool can do (#132): write_file is
+    only mentioned when this tool's row holds it (and web calls then withhold it)."""
+    text = (
+        "Let the model search the web (Gemini models only; ignored with a notice on OpenRouter) "
+        "and fetch URLs for this call. Omit to use the server default. Retrieved pages are "
+        "untrusted text, so treat what the model concludes from them as a claim to check."
+    )
+    if write:
+        text += (
+            f" On Gemini, while web access is on {WRITE_TOOL_NAME} is withheld and the model "
+            "cannot modify the working tree."
+        )
+    return text
+
+
 def _write_note(subject: str, workspace: Workspace, write: bool) -> str:
     if write:
         return (
@@ -255,9 +279,17 @@ def _openrouter_hint(
     return hint + disk + _ARTIFACT_CLAUSE[artifacts] + _OPENROUTER_WEB
 
 
+_NONE_ROW = (
+    "\n\nRepository access: none for this tool (set by tool_access in the sidekick config). "
+    "The model cannot read any file, so include the code or context you want considered "
+    "directly in this call."
+)
+
+
 def capability_hint(
     workspace: Optional[Workspace],
     *,
+    read: bool = True,
     write: bool,
     artifacts: ArtifactMode = "never",
     web_default: bool = False,
@@ -276,6 +308,14 @@ def capability_hint(
     tools are switched off, so the hint never claims the call leaves the tree untouched.
     """
     disk = " Writes to disk: the bridge appends this exchange to the session transcript."
+    if not read:
+        # tool_access = none: no file tool is offered, whatever the workspace or backend.
+        web_note = (
+            _OPENROUTER_WEB
+            if default_backend == "openrouter"
+            else _web_note(web_default, write_capable=False, supported=web_supported)
+        )
+        return _NONE_ROW + disk + _ARTIFACT_CLAUSE[artifacts] + web_note
     if default_backend == "openrouter":
         return _openrouter_hint(workspace, write, artifacts, gemini_available, disk, files)
     # Only claim write_file is withheld where it would otherwise have been offered:
@@ -360,10 +400,16 @@ _UNSTABLE_DEFAULT = (
 )
 
 
-def _wants_tools(backend: Backend, workspace: Optional[Workspace], model: str) -> bool:
-    """Whether a call to `model` would carry the repository file tools, consent aside."""
+def _wants_tools(
+    backend: Backend, workspace: Optional[Workspace], model: str, read: bool = True
+) -> bool:
+    """Whether a call to `model` would carry the repository file tools, consent aside.
+
+    `read` is the tool's resolved access level (tool_access): off means "none", which sends no
+    file tools, asks no repository-access question and adds no files notice."""
     return (
-        workspace is not None
+        read
+        and workspace is not None
         and workspace.tools_enabled
         and backend.supports_files
         and backend.tools_supported(model)
@@ -376,6 +422,7 @@ async def _preflight_until_stable(
     model: str,
     elicit: Optional[Elicit],
     workspace: Optional[Workspace],
+    read: bool = True,
 ) -> tuple[Optional[str], str, list[str], bool, ToolsReason]:
     """Preflight the model `session` will actually send to.
 
@@ -390,7 +437,7 @@ async def _preflight_until_stable(
     """
     notices: list[str] = []
     for _ in range(_MAX_PREFLIGHTS):
-        want_tools = _wants_tools(backend, workspace, model)
+        want_tools = _wants_tools(backend, workspace, model, read)
         pre = await backend.preflight(model, elicit, want_tools=want_tools)
         if not pre.proceed:
             return pre.message, model, notices, False, ""
@@ -412,6 +459,7 @@ async def call_gemini(
     thinking: ThinkingParam,
     model: Optional[str] = None,
     workspace: Optional[Workspace] = None,
+    read: bool = True,
     write: bool = False,
     artifact_topic: Optional[str] = None,
     web: Optional[bool] = None,
@@ -429,6 +477,10 @@ async def call_gemini(
     recorded in the transcript — including calls made before a failure. With `artifact_topic`
     (and a workspace), the final answer is saved as an artifact and its path appended to the
     reply; a failed save adds a notice but never loses the answer.
+
+    `read` and `write` are the tool's resolved tool_access level (none, read, write; write
+    includes read). With `read` off the call carries no file tools, asks no repository-access
+    question and adds no files notice, on every backend.
 
     `web` attaches Gemini's server-side search and URL fetch (#76). None follows the chosen
     backend's default. Web access and write_file are mutually exclusive within a call:
@@ -474,7 +526,7 @@ async def call_gemini(
         `tools` is preflight's decision for the model actually sent to (after preflight, and
         again for a fallback): on OpenRouter only some models accept tool definitions, and only
         after the user accepts repository access for that model."""
-        registry = workspace.registry(write=caps.write) if workspace and tools else None
+        registry = workspace.registry(write=caps.write) if read and workspace and tools else None
         instruction = system_instruction
         if registry:
             instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
@@ -487,7 +539,7 @@ async def call_gemini(
     def _files_notice(use_model: str, tools: bool, reason: ToolsReason) -> str:
         # Text notice, no consent needed: informational (the model saw no files), no privacy
         # or cost decision rides on it.
-        if workspace is None or not workspace.tools_enabled:
+        if not read or workspace is None or not workspace.tools_enabled:
             return ""
         if not backend.tools_supported(use_model):
             return (
@@ -495,7 +547,7 @@ async def call_gemini(
                 "repository files: it saw only this prompt and the session's earlier turns. "
                 "Paste the code, or pick a tool-capable model (list_models).\n\n"
             )
-        if not _wants_tools(backend, workspace, use_model) or tools:
+        if not _wants_tools(backend, workspace, use_model, read) or tools:
             return ""
         if reason == "declined":
             return (
@@ -517,7 +569,7 @@ async def call_gemini(
 
     try:
         refusal, checked, notices, tools, tools_reason = await _preflight_until_stable(
-            backend, session, requested_model, elicit, workspace
+            backend, session, requested_model, elicit, workspace, read
         )
     except ClientError as exc:
         _log.error("%s session=%r preflight failed: %s", tool_name, session_name, exc)
@@ -611,7 +663,7 @@ async def call_gemini(
                 fallback_model,
             )
             try:
-                want_fb = _wants_tools(backend, workspace, fallback_model)
+                want_fb = _wants_tools(backend, workspace, fallback_model, read)
                 pre_fb = await backend.preflight(fallback_model, elicit, want_tools=want_fb)
                 if not pre_fb.proceed:
                     return _log_failure(

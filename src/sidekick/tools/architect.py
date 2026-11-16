@@ -23,7 +23,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
 from sidekick.backends import ModelSource
-from sidekick.config import ThinkingLevel
+from sidekick.config import AccessLevel, ThinkingLevel
 from sidekick.tools.base import (
     ArtifactMode,
     ToolCapability,
@@ -34,6 +34,7 @@ from sidekick.tools.base import (
     model_param_hint,
     session_param_hint,
     tool_annotations,
+    web_param_hint,
 )
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace
@@ -47,7 +48,7 @@ _SYSTEM_PROMPT = (
 
 _TOOL_NAME = "architect"
 # Capability row (#68): read + write_file.
-_WRITE = True
+_ACCESS: AccessLevel = "write"
 
 # Artifact saved unless the caller passes write_artifact=false.
 _ARTIFACTS: ArtifactMode = "default"
@@ -59,10 +60,10 @@ _DESCRIPTION = (
 )
 
 
-# The capability row server.py advertises; _WRITE, _ARTIFACTS and _DESCRIPTION above
+# The capability row server.py advertises; _ACCESS, _ARTIFACTS and _DESCRIPTION above
 # stay the single source for each field.
 CAPABILITY = ToolCapability(
-    name=_TOOL_NAME, write=_WRITE, artifacts=_ARTIFACTS, summary=_DESCRIPTION
+    name=_TOOL_NAME, access=_ACCESS, artifacts=_ARTIFACTS, summary=_DESCRIPTION
 )
 
 
@@ -71,6 +72,7 @@ def register(
     client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
+    cap: ToolCapability = CAPABILITY,
 ) -> None:
     """Register architect with the MCP server."""
     model_hint = model_param_hint(client)
@@ -79,7 +81,8 @@ def register(
         description=_DESCRIPTION
         + capability_hint(
             workspace,
-            write=_WRITE,
+            read=cap.read,
+            write=cap.write,
             artifacts=_ARTIFACTS,
             web_default=client.web_default,
             web_supported=client.web_supported,
@@ -87,7 +90,7 @@ def register(
             gemini_available=client.surface.gemini_available,
             files=client.surface.files,
         ),
-        annotations=tool_annotations(workspace, write=_WRITE),
+        annotations=tool_annotations(workspace, write=cap.write),
     )
     async def architect(
         ctx: Context,  # type: ignore[type-arg]
@@ -105,20 +108,12 @@ def register(
             ),
         ] = None,
         session_name: Annotated[
-            str, Field(description=session_param_hint(workspace, write=_WRITE))
+            str, Field(description=session_param_hint(workspace, write=cap.write))
         ] = "default",
         model: Annotated[Optional[str], Field(description=model_hint)] = None,
         web: Annotated[
             Optional[bool],
-            Field(
-                description=(
-                    "Let the model search the web (Gemini models only; ignored with a "
-                    "notice on OpenRouter) and fetch URLs for this call. Omit to use the "
-                    "server default. Retrieved pages are untrusted text, so on Gemini, "
-                    "while web access is on write_file is withheld and the model cannot "
-                    "modify the working tree."
-                )
-            ),
+            Field(description=web_param_hint(cap.write)),
         ] = None,
         write_artifact: Annotated[
             bool,
@@ -141,7 +136,8 @@ def register(
             thinking=thinking,
             model=model,
             workspace=workspace,
-            write=_WRITE,
+            read=cap.read,
+            write=cap.write,
             web=web,
             elicit=elicitor(ctx),
             artifact_topic=(question or description) if write_artifact else None,

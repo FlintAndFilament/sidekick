@@ -310,11 +310,18 @@ Also in `v0.5.0`:
   `repo_access`, `billed_check`, `gemini_data_use`), model id and outcome (`accept`, `decline`,
   `cancel`, `unavailable`). No question or prompt text. Declines are now recorded too.
 
+### Per-tool file access (#132)
+
+- New `tool_access` config setting: `none`, `read` or `write` per tool (`ask`, `brainstorm`,
+  `review`, `debug`, `architect`). Defaults unchanged.
+- Enforced on Gemini and OpenRouter alike; consent, `file_tools.enabled` and the root auto-off
+  still apply. Tool descriptions, annotations, server instructions and `help` follow the setting.
+- Unknown tool names or levels fail config load. Changes need `/reload-plugins`.
+
 ---
 
 ## Open
 
-- Per-model / per-user tool configuration for OpenRouter (the second half of #132).
 - Web search for OpenRouter models: none today, `web=true` is ignored with a notice.
 
 New work is tracked in [GitHub issues](https://github.com/FlintAndFilament/sidekick/issues).

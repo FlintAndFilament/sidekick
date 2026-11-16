@@ -27,7 +27,7 @@ import re
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, get_args
 
 from pydantic import (
     BaseModel,
@@ -54,6 +54,10 @@ PLUGIN_OPENROUTER_KEY_VAR = "SIDEKICK_OPENROUTER_KEY"
 OPENROUTER_ENV_VAR = "OPENROUTER_API_KEY"
 
 ThinkingLevel = Literal["none", "low", "medium", "high"]
+# What a tool may do with the repository: nothing, read it, or read and write (write includes
+# read). Per-tool overrides live in Config.tool_access (#132).
+AccessLevel = Literal["none", "read", "write"]
+ToolName = Literal["ask", "brainstorm", "review", "debug", "architect"]
 AuthMethod = Literal["adc", "env", "keychain", "api_key"]
 
 
@@ -141,6 +145,8 @@ class Config(BaseModel):
     artifacts_dir: str = "./sidekick-artifacts"
     file_tools: FileToolsConfig = FileToolsConfig()
     web_tools: WebToolsConfig = WebToolsConfig()
+    # Per-tool repository access overriding each tool's built-in level; absent = built-in.
+    tool_access: dict[ToolName, AccessLevel] = {}
     auth: AuthConfig = AuthConfig()
     openrouter: OpenRouterConfig = OpenRouterConfig()
     # true = the user accepted that Google may use prompts sent through an unbilled Gemini API
@@ -194,6 +200,18 @@ def gemini_configured(config: Config, openrouter_key_present: bool) -> bool:
     )
 
 
+def _safe_loc(loc: tuple[int | str, ...]) -> str:
+    """Render a pydantic error location without echoing a dict key: pydantic puts an invalid
+    key into loc just before "[key]", and a key is user input (could be a secret)."""
+    parts = [str(p) for p in loc]
+    for i, p in enumerate(parts):
+        if p == "[key]" and i:
+            parts[i - 1] = "<unknown name>"
+    if len(parts) > 1 and parts[0] == "tool_access" and parts[1] not in get_args(ToolName):
+        parts[1] = "<unknown name>"
+    return ".".join(parts)
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
     """Load and validate config from path. Raises ConfigError on any failure.
 
@@ -221,7 +239,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     except ValidationError as exc:
         # Built from loc + msg only: pydantic's own text echoes input values, which could be a key.
         detail = "\n".join(
-            f"{'.'.join(str(p) for p in e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
+            f"{_safe_loc(e['loc'])}\n  {e['msg']} [type={e['type']}]\n    For further information visit {e.get('url', '')}"
             for e in exc.errors(include_input=False)
         )
         raise ConfigError(

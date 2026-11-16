@@ -19,6 +19,7 @@ from sidekick.client import GeminiClient
 from sidekick.config import Config
 from sidekick.guide import help_text
 from sidekick.server import build_server, server_instructions
+from sidekick.tools import effective_capabilities
 from sidekick.tools.base import capability_hint, tool_annotations
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace, build_workspace
@@ -472,16 +473,15 @@ class TestInstructionsStayWellFormed:
     """The rows are built from a mutable capability set; the prose must survive any of them."""
 
     def _always_writes_line(self, caps: object, tmp_path: Path) -> str:
-        with patch("sidekick.guide.CAPABILITIES", caps):
-            text = _full(_workspace(tmp_path))
+        text = help_text(_workspace(tmp_path), capabilities=caps)  # type: ignore[arg-type]
         return next(ln for ln in text.splitlines() if "Markdown artifact" in ln)
 
     def test_no_dangling_verb_when_nothing_saves_by_default(self, tmp_path: Path) -> None:
         from sidekick.tools.base import ToolCapability
 
         caps = (
-            ToolCapability("ask", write=False, artifacts="never"),
-            ToolCapability("review", write=True, artifacts="opt-in"),
+            ToolCapability("ask", access="read", artifacts="never"),
+            ToolCapability("review", access="write", artifacts="opt-in"),
         )
         line = self._always_writes_line(caps, tmp_path)
         assert "-  " not in line
@@ -491,9 +491,8 @@ class TestInstructionsStayWellFormed:
     def test_no_artifact_line_when_no_tool_saves_one(self, tmp_path: Path) -> None:
         from sidekick.tools.base import ToolCapability
 
-        caps = (ToolCapability("ask", write=False, artifacts="never"),)
-        with patch("sidekick.guide.CAPABILITIES", caps):
-            text = _full(_workspace(tmp_path))
+        caps = (ToolCapability("ask", access="read", artifacts="never"),)
+        text = help_text(_workspace(tmp_path), capabilities=caps)
         assert "Markdown artifact" not in text
 
     def test_skipped_row_reads_as_nothing_when_all_are_denied(self, tmp_path: Path) -> None:
@@ -602,3 +601,87 @@ class TestHelpText:
         """With file tools off there is no write to protect, so the advice would mislead."""
         text = _full(_workspace(tmp_path, enabled=False))
         assert "new session_name" not in text
+
+
+def test_defaults_match_todays_rows() -> None:
+    rows = {c.name: c.access for c in effective_capabilities({})}
+    assert rows == {
+        "ask": "read",
+        "brainstorm": "write",
+        "review": "write",
+        "debug": "read",
+        "architect": "write",
+    }
+
+
+def test_override_replaces_only_that_tool() -> None:
+    rows = {c.name: c for c in effective_capabilities({"review": "none", "ask": "write"})}
+    assert rows["review"].access == "none"
+    assert not rows["review"].read and not rows["review"].write
+    assert rows["ask"].write and rows["ask"].read
+    assert rows["architect"].access == "write"
+    assert rows["review"].artifacts == "default"  # artifacts untouched
+
+
+def test_none_row_says_no_access_on_gemini(tmp_path):
+    h = capability_hint(_workspace(tmp_path), read=False, write=False)
+    assert "Repository access: none for this tool" in h and "read_file" not in h
+
+
+def test_none_row_says_no_access_on_openrouter(tmp_path):
+    h = capability_hint(
+        _workspace(tmp_path),
+        read=False,
+        write=False,
+        default_backend="openrouter",
+        files=True,
+    )
+    assert "Repository access: none for this tool" in h
+
+
+def test_none_on_write_tool_with_web_omits_withheld_claim(tmp_path):
+    h = capability_hint(_workspace(tmp_path), read=False, write=False, web_default=True)
+    assert "write_file is withheld" not in h
+
+
+def test_override_write_with_kill_switch_stays_safe(tmp_path):
+    ws = _workspace(tmp_path, enabled=False)
+    assert tool_annotations(ws, write=True).destructiveHint is False
+    assert "Repository access: OFF" in capability_hint(ws, write=True)
+
+
+def test_built_server_advertises_the_override(tmp_path):
+    mcp = build_server(
+        _client(),
+        TranscriptWriter(str(tmp_path / "t"), datetime.now()),
+        _workspace(tmp_path),
+        effective_capabilities({"review": "read", "ask": "none"}),
+    )
+    tools = _tools(mcp)
+    assert "MAY MODIFY" not in tools["review"].description
+    assert tools["review"].annotations.destructiveHint is False
+    assert "Repository access: none for this tool" in tools["ask"].description
+
+
+class TestWebParamHint:
+    def test_helper_follows_write(self) -> None:
+        from sidekick.tools.base import web_param_hint
+
+        assert "write_file is withheld" in web_param_hint(True)
+        assert "write_file" not in web_param_hint(False)
+
+    def test_each_tool_param_follows_its_level(self, tmp_path: Path) -> None:
+        from sidekick.tools import effective_capabilities
+
+        transcript = TranscriptWriter(str(tmp_path / "t"), datetime.now())
+        caps = effective_capabilities({"review": "read", "ask": "write"})
+        mcp = build_server(_client(), transcript, _workspace(tmp_path), caps)  # type: ignore[arg-type]
+        tools = _tools(mcp)
+
+        def hint(t: str) -> str:
+            return tools[t].inputSchema["properties"]["web"]["description"]
+
+        assert "write_file" not in hint("review")
+        assert "write_file is withheld" in hint("ask")
+        assert "write_file is withheld" in hint("architect")
+        assert "write_file" not in hint("debug")

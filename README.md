@@ -40,7 +40,7 @@ Tested on macOS; Windows is not yet tested end to end.
 
 ## What it does
 
-| Tool | Use it for | Can write files? |
+| Tool | Use it for | Can write files? (default) |
 |---|---|---|
 | `ask` | A general question | no |
 | `brainstorm` | Unconventional ideas and alternatives | yes |
@@ -51,7 +51,7 @@ Tested on macOS; Windows is not yet tested end to end.
 | `list_sessions` | Lists the conversations in memory, to find one to continue | no |
 | `help` | Full usage detail by topic, for Claude | no |
 
-- **The model reads your repo itself**, inside a sandbox, so Claude names paths instead of pasting files: Gemini, and OpenRouter models that support tool calling, once you allow each one. Secrets and `.git` are always denied. → [Repository access](docs/tools.md#repository-access)
+- **The model reads your repo itself**, inside a sandbox, so Claude names paths instead of pasting files: Gemini, and OpenRouter models that support tool calling, once you allow each one. Secrets and `.git` are always denied. Per-tool levels are configurable with `tool_access`. → [Repository access](docs/tools.md#repository-access)
 - **Gemini searches the web with real sources** when a call passes `web=true` (OpenRouter models have no web search). It's off by default, and a web call can never write files. → [Web access](docs/tools.md#web-access)
 - **Keeps conversations.** The same `session_name` continues one; a new name starts fresh. → [Tools](docs/tools.md)
 - **Uses the newest model.** `flash`, `flash-lite` and `pro` track the newest release; an overloaded model falls back with a notice. → [Choosing a model](docs/configuration.md#choosing-a-model)

@@ -18,13 +18,18 @@ def _boot(
     tmp_path: Path,
     config: Config,
     build_auth: Optional[Callable[..., object]] = None,
+    calls: Optional[list[tuple[tuple[object, ...], dict[str, object]]]] = None,
 ) -> tuple[object, list[str]]:
     captured: list[object] = []
     served: list[str] = []
     monkeypatch.setattr("sidekick.config.load_config", lambda: config)
-    monkeypatch.setattr(
-        "sidekick.server.build_server", lambda source, *a, **k: captured.append(source)
-    )
+
+    def fake_build(source: object, *a: object, **k: object) -> None:
+        captured.append(source)
+        if calls is not None:
+            calls.append((a, k))
+
+    monkeypatch.setattr("sidekick.server.build_server", fake_build)
     monkeypatch.setattr("sidekick.openrouter.OpenRouterClient.refresh_catalog", lambda self: False)
     monkeypatch.setattr("sidekick.client.GeminiClient.refresh_latest", lambda self: {})
     monkeypatch.setattr("sidekick.workspace.project_root", lambda: tmp_path)
@@ -99,3 +104,22 @@ async def test_api_key_mode_asks_for_gemini_data_use_consent(
     assert isinstance(src, GeminiClient)
     pre = await src.preflight("gemini-3.5-flash", None)
     assert not pre.proceed and pre.message == GEMINI_DATA_USE_UNASKED
+
+
+def test_config_tool_access_reaches_build_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("SIDEKICK_OPENROUTER_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("SIDEKICK_API_KEY", "g")
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    cfg = Config(
+        auth={"method": "api_key"},
+        transcript_dir=str(tmp_path),
+        tool_access={"review": "none", "ask": "write"},
+    )
+    _boot(monkeypatch, tmp_path, cfg, calls=calls)
+    args, kwargs = calls[0]
+    caps = [x for x in (*args, *kwargs.values()) if isinstance(x, tuple)][0]
+    levels = {c.name: c.access for c in caps}  # type: ignore[attr-defined]
+    assert levels["review"] == "none" and levels["ask"] == "write"

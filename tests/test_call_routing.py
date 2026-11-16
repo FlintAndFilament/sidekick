@@ -568,3 +568,136 @@ def test_injected_context_is_not_a_tool_parameter(tmp_path):
     assert len(tools) == 5
     for tool in tools:
         assert "ctx" not in tool.inputSchema["properties"], tool.name
+
+
+# --- tool_access: the resolved level decides what the model is sent (#132) ---
+
+
+def _gemini_tool_names(gen: AsyncMock) -> set[str]:
+    tools = gen.call_args.kwargs["config"].tools
+    return {d.name for t in tools or [] for d in (t.function_declarations or [])}
+
+
+def _gemini_system(gen: AsyncMock) -> str:
+    return str(gen.call_args.kwargs["config"].system_instruction)
+
+
+async def test_none_sends_no_file_tools_on_gemini(tmp_path):
+    r, _, gen = _router(tmp_path, [], accepted_models=[])
+    answer = await _call(r, tmp_path, model="flash", read=False, write=False, web=False)
+    assert answer == "from gemini"
+    assert _gemini_tool_names(gen) == set()
+    assert "list_dir" not in _gemini_system(gen) and "read_file" not in _gemini_system(gen)
+
+
+async def test_none_sends_no_file_tools_on_openrouter(tmp_path):
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
+    answer = await _call(r, tmp_path, model=None, read=False, write=False)
+    assert answer == "fine"
+    post = fake.posts[0]
+    assert "tools" not in post
+    assert "list_dir" not in post["messages"][0]["content"]
+
+
+async def test_none_asks_no_repo_access_question(tmp_path):
+    r, fake, _ = _router(
+        tmp_path, [(200, reply())], accepted_models=[NEMO], catalog=_with_tools(NEMO)
+    )
+    elicit, asked = _asker("accept")
+    answer = await _call(r, tmp_path, model=None, read=False, elicit=elicit)
+    assert answer == "fine" and asked == []
+    assert "[sidekick notice]" not in answer
+    assert "tools" not in _sent(fake)[0]
+
+
+async def test_none_adds_no_files_notice_for_a_non_tool_model(tmp_path):
+    r, _, _ = _router(tmp_path, [(200, reply())], accepted_models=[GEMMA])
+    answer = await _call(r, tmp_path, model=GEMMA, read=False)
+    assert answer == "fine"
+
+
+async def test_read_override_withholds_write_file_on_openrouter(tmp_path):
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
+    await _call(r, tmp_path, model=None, read=True, write=False)
+    names = _tool_names(fake.posts[0])
+    assert "read_file" in names and "write_file" not in names
+
+
+async def test_raised_ask_gets_write_file_on_openrouter(tmp_path):
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
+    await _call(r, tmp_path, model=None, read=True, write=True)
+    assert "write_file" in _tool_names(fake.posts[0])
+
+
+async def test_read_withholds_and_write_offers_write_file_on_gemini(tmp_path):
+    r, _, gen = _router(tmp_path, [], accepted_models=[])
+    await _call(r, tmp_path, model="flash", read=True, write=False, web=False)
+    assert "read_file" in _gemini_tool_names(gen) and "write_file" not in _gemini_tool_names(gen)
+    await _call(r, tmp_path, model="flash", read=True, write=True, web=False)
+    assert "write_file" in _gemini_tool_names(gen)
+
+
+async def test_fallback_keeps_the_level(tmp_path):
+    script = [RATE_LIMITED, RATE_LIMITED, (200, reply())]
+    r, fake, _ = _router(
+        tmp_path,
+        script,
+        accepted_models=[NEMO, GEMMA],
+        repo_access_models=[NEMO, GEMMA],
+        catalog=_with_tools(NEMO, GEMMA),
+    )
+    await _call(r, tmp_path, read=True, write=False)
+    assert [p["model"] for p in fake.posts] == [NEMO, NEMO, GEMMA]
+    for post in fake.posts:
+        assert "read_file" in _tool_names(post) and "write_file" not in _tool_names(post)
+
+
+async def test_fallback_keeps_none(tmp_path):
+    script = [RATE_LIMITED, RATE_LIMITED, (200, reply())]
+    r, fake, _ = _router(
+        tmp_path,
+        script,
+        accepted_models=[NEMO, GEMMA],
+        repo_access_models=[NEMO, GEMMA],
+        catalog=_with_tools(NEMO, GEMMA),
+    )
+    answer = await _call(r, tmp_path, read=False)
+    assert [p["model"] for p in fake.posts] == [NEMO, NEMO, GEMMA]
+    assert all("tools" not in p for p in fake.posts)
+    assert "can't use tools" not in answer
+
+
+async def test_build_server_wires_the_override(tmp_path):
+    from sidekick.server import build_server
+    from sidekick.tools import effective_capabilities
+
+    r, fake, _ = _router(
+        tmp_path,
+        [(200, reply())],
+        accepted_models=[NEMO],
+        repo_access_models=[NEMO],
+        catalog=_with_tools(NEMO),
+    )
+    tr = TranscriptWriter(str(tmp_path / "t"), datetime.now())
+    mcp = build_server(r, tr, _workspace(tmp_path), effective_capabilities({"review": "read"}))
+    await mcp.call_tool("review", {"content": "code"})
+    names = _tool_names(_sent(fake)[0])
+    assert "read_file" in names and "write_file" not in names

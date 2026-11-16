@@ -71,6 +71,7 @@ def register(
     client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
+    cap: ToolCapability = CAPABILITY,
 ) -> None:
     """Register architect with the MCP server."""
     model_hint = model_param_hint(client)
@@ -79,7 +80,7 @@ def register(
         description=_DESCRIPTION
         + capability_hint(
             workspace,
-            write=CAPABILITY.write,
+            write=cap.write,
             artifacts=_ARTIFACTS,
             web_default=client.web_default,
             web_supported=client.web_supported,
@@ -87,7 +88,7 @@ def register(
             gemini_available=client.surface.gemini_available,
             files=client.surface.files,
         ),
-        annotations=tool_annotations(workspace, write=CAPABILITY.write),
+        annotations=tool_annotations(workspace, write=cap.write),
     )
     async def architect(
         ctx: Context,  # type: ignore[type-arg]
@@ -105,7 +106,7 @@ def register(
             ),
         ] = None,
         session_name: Annotated[
-            str, Field(description=session_param_hint(workspace, write=CAPABILITY.write))
+            str, Field(description=session_param_hint(workspace, write=cap.write))
         ] = "default",
         model: Annotated[Optional[str], Field(description=model_hint)] = None,
         web: Annotated[
@@ -141,7 +142,8 @@ def register(
             thinking=thinking,
             model=model,
             workspace=workspace,
-            write=CAPABILITY.write,
+            read=cap.read,
+            write=cap.write,
             web=web,
             elicit=elicitor(ctx),
             artifact_topic=(question or description) if write_artifact else None,

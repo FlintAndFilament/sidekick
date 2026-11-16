@@ -162,6 +162,7 @@ def _start() -> "Optional[FastMCP]":
     from sidekick.router import Router
     from sidekick.sandbox import SandboxError
     from sidekick.server import build_server
+    from sidekick.tools import effective_capabilities
     from sidekick.transcript import TranscriptError, TranscriptWriter
     from sidekick.workspace import build_workspace, project_root
 
@@ -238,7 +239,7 @@ def _start() -> "Optional[FastMCP]":
 
     _log.info("transcript → %s", transcript.path)
 
-    return build_server(source, transcript, workspace)
+    return build_server(source, transcript, workspace, effective_capabilities(config.tool_access))
 
 
 if __name__ == "__main__":

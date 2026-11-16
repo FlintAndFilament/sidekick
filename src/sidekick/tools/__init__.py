@@ -18,7 +18,7 @@ Imports:  tools/ask.py, tools/brainstorm.py, tools/review.py, tools/debug.py, to
 from collections.abc import Mapping
 from dataclasses import replace
 
-from sidekick.config import AccessLevel
+from sidekick.config import AccessLevel, ToolName
 from sidekick.tools.architect import CAPABILITY as CAPABILITY_ARCHITECT
 from sidekick.tools.architect import register as register_architect
 from sidekick.tools.ask import CAPABILITY as CAPABILITY_ASK
@@ -47,9 +47,11 @@ CAPABILITIES: tuple[ToolCapability, ...] = (
 )
 
 
-def effective_capabilities(overrides: Mapping[str, AccessLevel]) -> tuple[ToolCapability, ...]:
+def effective_capabilities(overrides: Mapping[ToolName, AccessLevel]) -> tuple[ToolCapability, ...]:
     """CAPABILITIES with each tool's access level replaced where `overrides` names it (#132)."""
-    return tuple(replace(c, access=overrides.get(c.name, c.access)) for c in CAPABILITIES)
+    levels: dict[str, AccessLevel] = dict(overrides)
+    return tuple(replace(c, access=levels.get(c.name, c.access)) for c in CAPABILITIES)
+
 
 __all__ = [
     "register_ask",

@@ -23,13 +23,14 @@ Imports:  backends.py (ModelSource), guide.py, transcript.py (TranscriptWriter),
           tools/__init__.py, workspace.py (Workspace)
 """
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from mcp.server.fastmcp import FastMCP
 
 from sidekick.backends import ModelSource
 from sidekick.guide import HELP_TOPICS, help_text, server_instructions
 from sidekick.tools import (
+    CAPABILITIES,
     register_architect,
     register_ask,
     register_brainstorm,
@@ -39,6 +40,7 @@ from sidekick.tools import (
     register_list_sessions,
     register_review,
 )
+from sidekick.tools.base import ToolCapability
 from sidekick.transcript import TranscriptWriter
 from sidekick.workspace import Workspace
 
@@ -51,21 +53,25 @@ def build_server(
     client: ModelSource,
     transcript: TranscriptWriter,
     workspace: Optional[Workspace] = None,
+    capabilities: Sequence[ToolCapability] = CAPABILITIES,
 ) -> FastMCP:
     """Construct and return the configured MCP server with all tools registered.
 
-    `workspace` gives the generating tools repo file access; None disables it entirely."""
+    `workspace` gives the generating tools repo file access; None disables it entirely.
+    `capabilities` are the resolved per-tool rows (tool_access applied); a tool whose row is
+    missing keeps its default."""
     mcp = FastMCP(
         _SERVER_NAME,
         instructions=server_instructions(
             workspace, transcript, client.web_default, client.web_supported, surface=client.surface
         ),
     )
-    register_ask(mcp, client, transcript, workspace)
-    register_brainstorm(mcp, client, transcript, workspace)
-    register_review(mcp, client, transcript, workspace)
-    register_debug(mcp, client, transcript, workspace)
-    register_architect(mcp, client, transcript, workspace)
+    rows = {c.name: c for c in (*CAPABILITIES, *capabilities)}  # later rows win
+    register_ask(mcp, client, transcript, workspace, rows["ask"])
+    register_brainstorm(mcp, client, transcript, workspace, rows["brainstorm"])
+    register_review(mcp, client, transcript, workspace, rows["review"])
+    register_debug(mcp, client, transcript, workspace, rows["debug"])
+    register_architect(mcp, client, transcript, workspace, rows["architect"])
     register_list_models(mcp, client, transcript)
     register_list_sessions(mcp, client)
     register_help(

@@ -368,10 +368,16 @@ _UNSTABLE_DEFAULT = (
 )
 
 
-def _wants_tools(backend: Backend, workspace: Optional[Workspace], model: str) -> bool:
-    """Whether a call to `model` would carry the repository file tools, consent aside."""
+def _wants_tools(
+    backend: Backend, workspace: Optional[Workspace], model: str, read: bool = True
+) -> bool:
+    """Whether a call to `model` would carry the repository file tools, consent aside.
+
+    `read` is the tool's resolved access level (tool_access): off means "none", which sends no
+    file tools, asks no repository-access question and adds no files notice."""
     return (
-        workspace is not None
+        read
+        and workspace is not None
         and workspace.tools_enabled
         and backend.supports_files
         and backend.tools_supported(model)
@@ -384,6 +390,7 @@ async def _preflight_until_stable(
     model: str,
     elicit: Optional[Elicit],
     workspace: Optional[Workspace],
+    read: bool = True,
 ) -> tuple[Optional[str], str, list[str], bool, ToolsReason]:
     """Preflight the model `session` will actually send to.
 
@@ -398,7 +405,7 @@ async def _preflight_until_stable(
     """
     notices: list[str] = []
     for _ in range(_MAX_PREFLIGHTS):
-        want_tools = _wants_tools(backend, workspace, model)
+        want_tools = _wants_tools(backend, workspace, model, read)
         pre = await backend.preflight(model, elicit, want_tools=want_tools)
         if not pre.proceed:
             return pre.message, model, notices, False, ""
@@ -420,6 +427,7 @@ async def call_gemini(
     thinking: ThinkingParam,
     model: Optional[str] = None,
     workspace: Optional[Workspace] = None,
+    read: bool = True,
     write: bool = False,
     artifact_topic: Optional[str] = None,
     web: Optional[bool] = None,
@@ -437,6 +445,10 @@ async def call_gemini(
     recorded in the transcript — including calls made before a failure. With `artifact_topic`
     (and a workspace), the final answer is saved as an artifact and its path appended to the
     reply; a failed save adds a notice but never loses the answer.
+
+    `read` and `write` are the tool's resolved tool_access level (none, read, write; write
+    includes read). With `read` off the call carries no file tools, asks no repository-access
+    question and adds no files notice, on every backend.
 
     `web` attaches Gemini's server-side search and URL fetch (#76). None follows the chosen
     backend's default. Web access and write_file are mutually exclusive within a call:
@@ -482,7 +494,7 @@ async def call_gemini(
         `tools` is preflight's decision for the model actually sent to (after preflight, and
         again for a fallback): on OpenRouter only some models accept tool definitions, and only
         after the user accepts repository access for that model."""
-        registry = workspace.registry(write=caps.write) if workspace and tools else None
+        registry = workspace.registry(write=caps.write) if read and workspace and tools else None
         instruction = system_instruction
         if registry:
             instruction += _READ_PREAMBLE + (_WRITE_PREAMBLE if caps.write else "")
@@ -495,7 +507,7 @@ async def call_gemini(
     def _files_notice(use_model: str, tools: bool, reason: ToolsReason) -> str:
         # Text notice, no consent needed: informational (the model saw no files), no privacy
         # or cost decision rides on it.
-        if workspace is None or not workspace.tools_enabled:
+        if not read or workspace is None or not workspace.tools_enabled:
             return ""
         if not backend.tools_supported(use_model):
             return (
@@ -503,7 +515,7 @@ async def call_gemini(
                 "repository files: it saw only this prompt and the session's earlier turns. "
                 "Paste the code, or pick a tool-capable model (list_models).\n\n"
             )
-        if not _wants_tools(backend, workspace, use_model) or tools:
+        if not _wants_tools(backend, workspace, use_model, read) or tools:
             return ""
         if reason == "declined":
             return (
@@ -525,7 +537,7 @@ async def call_gemini(
 
     try:
         refusal, checked, notices, tools, tools_reason = await _preflight_until_stable(
-            backend, session, requested_model, elicit, workspace
+            backend, session, requested_model, elicit, workspace, read
         )
     except ClientError as exc:
         _log.error("%s session=%r preflight failed: %s", tool_name, session_name, exc)
@@ -619,7 +631,7 @@ async def call_gemini(
                 fallback_model,
             )
             try:
-                want_fb = _wants_tools(backend, workspace, fallback_model)
+                want_fb = _wants_tools(backend, workspace, fallback_model, read)
                 pre_fb = await backend.preflight(fallback_model, elicit, want_tools=want_fb)
                 if not pre_fb.proceed:
                     return _log_failure(

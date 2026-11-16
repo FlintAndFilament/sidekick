@@ -49,10 +49,10 @@ Tools package: `src/sidekick/tools/`.
 |---|---|---|
 | `tools/__init__.py` | Re-exports every `register_*` and collects the five `CAPABILITY` rows into `CAPABILITIES` | every tool module, tools/base |
 | `tools/base.py` | `ToolCapability`, `capability_hint()`, `tool_annotations()`, `session_param_hint()`, `model_param_hint()`, `elicitor()` (an `Elicit` over MCP elicitation, or None when the client can't be asked), and `call_gemini()` | backends, client, config, file_tools, sandbox, sources, tool_loop, transcript, web_tools, workspace |
-| `tools/ask.py` | `ask`: general question. Read-only, no artifacts | tools/base, backends, config, transcript, workspace |
+| `tools/ask.py` | `ask`: general question. Read-only by default (see `tool_access`), no artifacts | tools/base, backends, config, transcript, workspace |
 | `tools/brainstorm.py` | `brainstorm`: divergent ideas. Read+write, artifacts opt-in | same as ask |
 | `tools/review.py` | `review`: critical review. Read+write, artifacts on by default | same as ask |
-| `tools/debug.py` | `debug`: root-cause hypotheses. Read-only, no artifacts | same as ask |
+| `tools/debug.py` | `debug`: root-cause hypotheses. Read-only by default (see `tool_access`), no artifacts | same as ask |
 | `tools/architect.py` | `architect`: design and tradeoffs. Read+write, artifacts on by default | same as ask |
 | `tools/list_models.py` | `list_models`: the OpenRouter section (featured picks, `query=`, `check=`) and the live, chat-capable Gemini catalog, which falls back to the static shortlist. `check=` on a paid model not yet accepted asks before its billed privacy probe (#142) | backends, client, consent, models, openrouter, openrouter_catalog, tools/base, transcript (signature only) |
 | `tools/list_sessions.py` | `list_sessions`: renders the live sessions (tool, `session_name`, model, turns), most recently used first (#15) | backends, client, tools/base |

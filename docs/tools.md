@@ -78,6 +78,12 @@ Gemini model, and every OpenRouter model whose catalog entry lists tool calling 
 | `architect` | ✅ | ✅ | **default** (`write_artifact=false` to skip) |
 | `review` | ✅ | ✅ | **default** (`write_artifact=false` to skip) |
 
+These are the built-in levels. The `tool_access` setting ([configuration.md](configuration.md#tool_access))
+overrides them per tool with `none`, `read` or `write`, on both backends: `none` offers no file
+tools, `read` the four read tools, `write` adds `write_file`. A tool set to `none` says "Repository
+access: none for this tool" in its description and in `help`. Per-model consent,
+`file_tools.enabled` and the root auto-off still apply on top, and artifact saving is unaffected.
+
 **Tools the model can call** (paths are relative to the repo root):
 
 | Tool | Does | Cap |

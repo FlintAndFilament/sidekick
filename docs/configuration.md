@@ -44,6 +44,10 @@ ignored silently, so check spelling if a setting seems to have no effect.
   "web_tools": {
     "enabled": false
   },
+  "tool_access": {
+    "ask": "none",
+    "review": "read"
+  },
   "auth": {
     "method": "adc"
   }
@@ -213,6 +217,41 @@ anywhere; `dir/**` covers any directory named `dir` and everything in it (so `.g
 covers a nested `vendor/lib/.git/`).
 **Setting this replaces the defaults** — copy them into your list if you want to keep them.
 An empty list (`[]`) means no deny-list at all; the tool descriptions say so.
+
+---
+
+### `tool_access`
+
+**Type:** object mapping a tool name to a level
+**Default:** `{}` (every tool keeps its built-in level)
+**Example:** `"tool_access": {"ask": "none", "review": "read"}`
+
+What each generating tool may do with the repository. Tool names are `ask`, `brainstorm`,
+`review`, `debug` and `architect`. Levels:
+
+- `none`: no file tools are offered, so the model sees only what you put in the call.
+- `read`: `list_dir`, `glob`, `grep` and `read_file`.
+- `write`: the `read` tools plus `write_file` (write includes read).
+
+Built-in levels, used for any tool you don't name:
+
+| Tool | Built-in level |
+|---|---|
+| `ask` | `read` |
+| `debug` | `read` |
+| `brainstorm` | `write` |
+| `review` | `write` |
+| `architect` | `write` |
+
+It applies to Gemini (API key and Agent Platform) and to OpenRouter models alike. Raising a tool
+is allowed (`"ask": "write"`). It sets a ceiling per tool, not a grant: the other gates still
+apply on top, namely `file_tools.enabled`, the per-model repository consent for OpenRouter
+(`openrouter.repo_access_models`), the home-directory and filesystem-root auto-off, and the rule
+that web and `write_file` never share a call. Artifact saving is not affected by `tool_access`.
+
+An unknown tool name or level stops startup with a config error (the message does not echo the
+value). The setting is read once at startup, so changes take effect after `/reload-plugins`. A
+tool set to `none` says so in its description and in `help`.
 
 ---
 

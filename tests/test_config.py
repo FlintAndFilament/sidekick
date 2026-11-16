@@ -258,3 +258,10 @@ def test_tool_access_unknown_level_is_rejected_without_echo() -> None:
         _load({"tool_access": {"ask": "sk-or-v1-secret"}})
     assert "tool_access" in str(exc.value)
     assert "sk-or-v1-secret" not in str(exc.value)
+
+
+def test_tool_access_unknown_key_with_bad_value_is_not_echoed() -> None:
+    with pytest.raises(ConfigError) as exc:
+        _load({"tool_access": {"sk-or-v1-abc": "bogus"}})
+    assert "tool_access" in str(exc.value)
+    assert "sk-or-v1-abc" not in str(exc.value)

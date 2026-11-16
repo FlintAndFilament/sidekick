@@ -27,7 +27,7 @@ import re
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, get_args
 
 from pydantic import (
     BaseModel,
@@ -207,6 +207,8 @@ def _safe_loc(loc: tuple[int | str, ...]) -> str:
     for i, p in enumerate(parts):
         if p == "[key]" and i:
             parts[i - 1] = "<unknown name>"
+    if len(parts) > 1 and parts[0] == "tool_access" and parts[1] not in get_args(ToolName):
+        parts[1] = "<unknown name>"
     return ".".join(parts)
 
 
